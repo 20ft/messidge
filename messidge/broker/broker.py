@@ -17,7 +17,7 @@ import os
 import zmq
 import cbor
 from zmq.utils.monitor import recv_monitor_message
-from .identity import AccountConfirmationServer
+from .identity import Identity, AccountConfirmationServer
 from .agent import Agent
 from .auth import Authenticate
 
@@ -26,14 +26,14 @@ from .message import BrokerMessage
 
 
 class Broker:
-    def __init__(self, keys, identity, model, node_type, session_type, controller, commands, *,
+    def __init__(self, keys, model, node_type, session_type, controller, *,
                  base_port=2020, pre_run_callback=None, session_recovered_callback=None, session_destroy_callback=None):
         """Initialise with location and the private/secret key pair"""
         # Basic structure
         self.keys = keys
         self.model = model
         self.controller = controller
-        self.commands = commands
+        self.commands = controller.commands
         self.node_type = node_type
         self.session_type = session_type
         self.session_recovered_callback = session_recovered_callback
@@ -49,9 +49,9 @@ class Broker:
         self.node_pk_rid = {}
         self.local_replies = {}  # map from uuid to function call
         self.forward_replies = LRU(1024)  # map from msg.uuid to rid so we can forward replies
-        self.identity = identity
-        self.authenticator = Authenticate(identity, self.keys)
-        self.account_confirm = AccountConfirmationServer(identity, self.keys, base_port + 1)
+        self.identity = Identity()
+        self.authenticator = Authenticate(self.identity, self.keys)
+        self.account_confirm = AccountConfirmationServer(self.identity, self.keys, base_port + 1)
         self.loop = None
         self.next_connection_rid = None
 
@@ -407,10 +407,10 @@ class Broker:
 
         # is this a broker command, is it expecting a reply and can we send it?
         try:
-            command = msg.command
-            if self.commands[command][1]:  # Needs reply
+            necessary_params, needs_reply, node_only = self.commands[msg.command]
+            if needs_reply:
                 msg.raise_if_cant_reply()
-            if self.commands[command][2]:  # Needs to have come from a node
+            if node_only:
                 if msg.rid not in self.node_rid_pk:
                     raise ValueError("This call is for nodes only")
         except KeyError:
@@ -418,7 +418,6 @@ class Broker:
             return  # no need to check params, we know message is not for the broker
 
         # have all the parameters for the command been sent?
-        necessary_params = self.commands[msg.command][0]
         for necessary in necessary_params:
             if necessary not in msg.params:
                 raise ValueError("Necessary parameter was not passed: " + necessary)
@@ -472,3 +471,10 @@ class SessionMinimal:
     def close(self, broker):
         pass
 
+
+class ControllerMinimal:
+    commands = {}
+
+
+def cmd(required_params, *, needs_reply=False, node_only=False):
+    return required_params, needs_reply, node_only
