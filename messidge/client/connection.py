@@ -36,14 +36,14 @@ class Connection:
     # x_thread_socket is the "pickup" end of the per-thread sending sockets forwards to skt
     # Note that messages received are exclusively dealt with on the background thread
 
-    def __init__(self, location: str=None, location_ip: str=None,
+    def __init__(self, location: str=None, prefix='~/.messidge', location_ip: str=None,
                  keys: KeyPair=None, server_pk: str=None):
         super().__init__()
         """Instantiate a connection, using the location to connect to (fqdn)"""
         # location_ip is an alternative (local) ip or name.local
         self.connect_ip = location_ip if location_ip is not None else location
         self.location = location if location is not None else self.connect_ip
-        self.keys = keys if keys is not None else KeyPair(location, prefix='~/.20ft')
+        self.keys = keys if keys is not None else KeyPair(location, prefix=prefix)
         self.inproc_name = "inproc://x_thread/" + str(id(self))
         self.nonce = None
         self.session_key = None
@@ -51,10 +51,9 @@ class Connection:
         self.thread_skt = {}  # map from thread to the socket used to send messages on it's behalf
         self.rid = b''
         self.loop = None
-        self.ready_lock = allocate_lock()
-        self.start_block = allocate_lock()
-        self.finished_block = allocate_lock()
         self.exception = None
+        self.ready_lock = allocate_lock()
+        self.finished_block = allocate_lock()
         self.uuid_blockreply = {}
         self.uuid_blockresults = {}
         self.connected = False
@@ -62,10 +61,10 @@ class Connection:
 
         # fetch the server's public key
         if server_pk is None:
+            filename = os.path.expanduser('%s/%s.spub' % (prefix, location))
             try:
-                filename = os.path.expanduser('~/.20ft/%s.spub' % location)
                 with open(filename, 'r') as f:
-                    server_pk = f.read().strip('\n')
+                    server_pk = f.read()
             except FileNotFoundError:
                 raise RuntimeError("There is no server public key in %s so cannot connect" % filename)
         self.server_public_binary = b64decode(server_pk)
@@ -81,34 +80,26 @@ class Connection:
 
         # Should be able to connect, then.
         self.ready_lock.acquire()
-        self.start_block.acquire()
         self.finished_block.acquire()
         start_new_thread(self._start, ())
 
-    def start(self):
-        """Start message loop - separate from __init__ so we get a chance to register_exclusive/register_commands"""
-        self.start_block.release()  # causes the block in _start to clear
-
     def wait_until_ready(self, timeout=120):
-        """Blocks waiting for the """
-        # this lock is used for waiting on while uploading layers, needs to be long
+        """Blocks waiting for the connection to be ready to use"""
         self.ready_lock.acquire(timeout=timeout)
         self.ready_lock.release()
-        if self.exception:
-            raise self.exception
+        self._maybe_raise()
         return self
 
     def wait_until_finished(self):
         """Blocks until the message loop exits"""
         self.finished_block.acquire()
         self.finished_block.release()
-
-        # re-raises (on the main thread) if the loop caught an exception
-        if self.exception is not None:
-            raise self.exception
+        self._maybe_raise()
+        return self
 
     def disconnect(self):
         """Stop the message loop and disconnect - without this object cannot be garbage collected"""
+        self._maybe_raise()
         self.loop.stop()
         for skt in self.thread_skt.values():
             skt.disconnect(self.inproc_name)
@@ -140,19 +131,15 @@ class Connection:
         self.loop = Loop(self.skt)
         self.loop.register_exclusive(self.skt_monitor, self._socket_event, "Socket events")
         self.loop.register_exclusive(self.x_thread_receive, self._fast_forward, "Cross thread socket")
-
-        # block until allowed to go by start()
-        self.start_block.acquire()
         self.loop.run()  # blocks until loop.stop is called
-        self.exception = self.loop.caught_exception
 
-        # Maybe the main thread was in wait_until_ready
-        if self.exception is not None:
-            self.unblock_and_raise(self.exception)
-
-        # Maybe the main thread was in send_blocking_cmd
+        # Maybe the main thread is in send_blocking_cmd
         for block in self.uuid_blockreply.values():
             block.release()
+
+        # Maybe the main thread is in wait_until_ready
+        if self.loop.caught_exception is not None:
+            self.unblock_and_raise(self.loop.caught_exception)
 
         # Maybe the main thread is in wait_until_complete
         self.finished_block.release()
@@ -219,7 +206,6 @@ class Connection:
 
     def destroy_send_skt(self):
         """Closes and removes the send_skt for this thread"""
-        # TODO: send_skt should be an object so we can garbage collect
         thread = get_ident()
         try:
             self.thread_skt[thread].close()
@@ -236,6 +222,7 @@ class Connection:
            bulk is for passing blobs
            reply_callback gives the object.method to call on the background thread when the command receives a reply
         """
+        self._maybe_raise()
         # BS check
         if self.loop is None:
             raise RuntimeError("The connection has no message loop - _start has not been called.")
@@ -259,20 +246,20 @@ class Connection:
            bulk is for passing blobs
            returns the reply message
         """
-        thread = get_ident()
-        if thread == self.loop_thread:
+        on_loop_thread = self._maybe_raise()
+        if on_loop_thread:
             raise RuntimeError("Cannot send a blocking command on the loop thread")
 
         # acquire a lock, wait for the reply
         uuid = shortuuid.uuid().encode()
         self.uuid_blockreply[uuid] = allocate_lock()
         self.uuid_blockreply[uuid].acquire()
+        self.uuid_blockresults[uuid] = None
         self.send_cmd(cmd, params, uuid=uuid, reply_callback=self._unblock, bulk=bulk)
 
         # when the background thread has an answer, the lock will release and we can continue
         if not self.uuid_blockreply[uuid].acquire(timeout=timeout):
             raise ValueError("Blocking call timed out: %s(%s)" % (cmd.decode(), str(params)))
-
         msg = self.uuid_blockresults[uuid]
 
         # clean up
@@ -280,11 +267,7 @@ class Connection:
         del self.uuid_blockreply[uuid]
         del self.uuid_blockresults[uuid]
 
-        # raise exceptions if either in the message or caught on a background thread
-        if 'exception' in msg.params:
-            raise ValueError(msg.params['exception'])
-        if self.exception:
-            raise self.exception
+        self._maybe_raise()
         return msg
 
     def register_commands(self, obj, commands):
@@ -325,7 +308,24 @@ class Connection:
     def unblock_and_raise(self, exception):
         # releases the lock but causes the thread in 'wait_until_ready' to raise an exception
         self.exception = exception
-        self.ready_lock.release()
+        if self.ready_lock.locked():
+            self.ready_lock.release()
+
+    def _maybe_raise(self):
+        """See if the message loop captured an exception"""
+        # returns bool for whether or not you're on the loop thread
+        thread = get_ident()
+        if thread == self.loop_thread:
+            return True
+        # anything to raise?
+        if self.loop.caught_exception:
+            self.exception = self.loop.caught_exception
+            self.loop.caught_exception = None
+        if self.exception:
+            excpt = self.exception
+            self.exception = None
+            raise excpt
+        return False
 
     def __repr__(self):
         return "<messidge.connection.Connection object at %s (location=%s)>" % (id(self), self.location)

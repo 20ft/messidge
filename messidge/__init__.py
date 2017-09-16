@@ -23,22 +23,27 @@ from libnacl.public import SecretKey
 class KeyPair:
     """Holds a public/secret key pair as base 64 - bytes not strings"""
 
-    def __init__(self, name=None, prefix='~/.20ft', public=None, secret=None):
+    def __init__(self, name=None, prefix='~/.messidge', public=None, secret=None):
+        # initialised the 'usual' way?
         self.public = public
         self.secret = secret
+        if public is not None and secret is not None:
+            return
         if name is None:
             return
+        if prefix is None:
+            raise RuntimeError("Prefix cannot be None")
 
-        # we are also fetching the keys
+        # we are fetching the keys
         expand = os.path.expanduser(prefix)
         try:
             with open(expand + '/' + name + ".pub", 'rb') as f:
-                self.public = f.read()[:-1]
+                self.public = f.read()
         except FileNotFoundError:
             raise RuntimeError("No public key found, halting")
         try:
             with open(expand + '/' + name, 'rb') as f:
-                self.secret = f.read()[:-1]
+                self.secret = f.read()
         except FileNotFoundError:
             raise RuntimeError("No private key found, halting")
 
@@ -49,29 +54,39 @@ class KeyPair:
         return b64decode(self.secret)
 
     @staticmethod
-    def new():
+    def new(name=None, prefix='~/.messidge'):
         """Create a new random key pair"""
         keys = SecretKey()
         rtn = KeyPair()
         rtn.public = b64encode(keys.pk)
         rtn.secret = b64encode(keys.sk)
+
+        # are we persisting them?
+        if name is not None and prefix is not None:
+            expand = os.path.expanduser(prefix)
+            os.makedirs(expand, exist_ok=True)
+            with open(expand + '/' + name + ".pub", 'w+b') as f:
+                f.write(rtn.public)
+            with open(expand + '/' + name, 'w+b') as f:
+                f.write(rtn.secret)
+
         return rtn
 
     def __repr__(self):
         return "<messidge.Keys object at %x (pk=%s)>" % (id(self), self.public)
 
 
-def default_location():
+def default_location(prefix='~/.messidge'):
     try:
-        with open(os.path.expanduser('~/.20ft/default_location'), 'r') as f:
+        with open(os.path.expanduser(prefix + '/default_location'), 'r') as f:
             return f.read().strip('\n')
     except FileNotFoundError:
-        raise RuntimeError("""There is no ~/.20ft/default_location so cannot choose default location.""")
+        raise RuntimeError("""There is no default_location file so cannot choose default location.""")
 
 
-def create_account(location, token):
-    # The new key pair
-    keys = KeyPair.new()
+def create_account(location, token, prefix='~/.messidge'):
+    # The new key pair (will be written to disk)
+    keys = KeyPair.new(name=location, prefix=prefix)
 
     # Let the server know
     conn = HTTPConnection(location, 2021)
@@ -87,15 +102,10 @@ def create_account(location, token):
         print(reply, file=stderr)
         exit(1)
 
-    # write out the appropriate files
-    directory = os.path.expanduser('~/.20ft/')
+    # write out the default location and server public key
+    directory = os.path.expanduser(prefix) + '/'
     os.makedirs(directory, exist_ok=True)
     with open(directory + 'default_location', 'w') as f:
-        f.write(location + "\n")
+        f.write(location)
     with open(directory + location + '.spub', 'w') as f:
-        f.write(reply + "\n")
-    with open(directory + location + '.pub', 'w') as f:
-        f.write(keys.public.decode() + "\n")
-    with open(directory + location, 'w') as f:
-        f.write(keys.secret.decode() + "\n")
-
+        f.write(reply)

@@ -167,7 +167,7 @@ class BrokerMessage:
         """Logs a message being sent, received etc."""
         # Needs logging level DEBUG and even then it only sends to STDOUT
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            param_string = "--"
+            param_string = "-encrypted-"
             if isinstance(params, dict):
                 param_string = str(list(params.keys()))
             if isinstance(params, list):

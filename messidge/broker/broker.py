@@ -49,8 +49,9 @@ class Broker:
         self.node_pk_rid = {}
         self.local_replies = {}  # map from uuid to function call
         self.forward_replies = LRU(1024)  # map from msg.uuid to rid so we can forward replies
+        self.identity = identity
         self.authenticator = Authenticate(identity, self.keys)
-        self.account_confirm = AccountConfirmationServer(identity.db, self.keys, base_port + 1)
+        self.account_confirm = AccountConfirmationServer(identity, self.keys, base_port + 1)
         self.loop = None
         self.next_connection_rid = None
 
@@ -83,7 +84,7 @@ class Broker:
         self.loop.run()
 
     def stop(self):
-        self.account_confirm.terminate()
+        self.identity.stop()  # confirmation server just bins out when we exit (a daemon thread)
         self.loop.stop()
 
     # sending a fresh command
@@ -175,11 +176,12 @@ class Broker:
                 self.session_recovered_callback(session, msg.params['rid'])
         else:
             # if an alias is connecting then it will need the original pk to be used because encryption
-            session = self.session_create_callback(msg.rid, msg.params['user'], pk, msg.params['nonce'])
+            session = self.session_create_callback(msg.rid, pk, msg.params['nonce'])
+            self.model.sessions[msg.rid] = session
             resources = self.model.resources(pk)
 
         self.model.sessions[msg.rid] = session
-        self.model.create_session_record(msg.rid)
+        self.model.create_session_record(session)
         logging.info("Connected session: " + str(msg.rid))
 
         # create the encryption agent
@@ -262,7 +264,7 @@ class Broker:
         logging.info("Node disconnected: " + b64encode(pk).decode())
 
     def _disconnect_user(self, rid):
-        """Disconnect a single session"""
+        """Disconnect a single session - fires a callback"""
         try:
             sess = self.model.sessions[rid]
         except KeyError:
@@ -272,7 +274,7 @@ class Broker:
         logging.info("Session disconnected: " + str(rid))
 
         if self.session_destroy_callback is not None:
-            self.session_destroy_callback(rid)
+            self.session_destroy_callback(sess)
         del self.model.sessions[rid]
 
     # Entrypoint for events that have come in over zmq
@@ -357,11 +359,14 @@ class Broker:
 
                 # if there is a claim to be a certain user it needs validating
                 if 'user' in msg.params:
+                    if not isinstance(msg.params['user'], bytes):
+                        raise ValueError("Send user pk in binary")
+                    user = b64encode(msg.params['user']).decode()
                     if msg.rid not in self.rid_agent:
-                        raise ValueError("Claimed user not initialised: " + str(msg.command))
+                        raise ValueError("Claimed user not initialised: " + user)
                     if self.rid_agent[msg.rid].pk != msg.params['user']:
-                        raise ValueError("Claimed user pk is wrong: " + str(msg.command))
-                    logging.debug("Validated claim to be user: " + b64encode(msg.params['user']).decode())
+                        raise ValueError("Claimed user pk is wrong: " + user)
+                    logging.debug("Validated claim to be user: " + user)
 
                 # if there is a claim to be a certain session it needs validating
                 if 'session' in msg.params:
@@ -436,6 +441,20 @@ class ModelMinimal:
         self.nodes = {}
         self.sessions = {}
 
+    # overload if you want to make a resource offer to the client
+    def resources(self, pk):
+        return None
+
+    # overload these if you want to make persistent sessions
+    def create_session_record(self, sess):
+        pass
+
+    def update_session_record(self, sess):
+        pass
+
+    def delete_session_record(self, sess):
+        pass
+
 
 class NodeMinimal:
     def __init__(self, pk):
@@ -448,3 +467,8 @@ class SessionMinimal:
         self.pk = pk
         self.nonce = nonce
         self.old_rid = rid  # for use with reconnection
+
+    # overload to free resources - can use passed broker to send commands to nodes
+    def close(self, broker):
+        pass
+

@@ -36,7 +36,7 @@ class Authenticate:
 
         # A node, then?
         try:
-            json = self.identity.node_params_from_db(pk)
+            json = self.identity.node_config_from_db(pk)
             logging.info("Authentication succeeded as node: " + str(pk))
             return True, False, json
         except ValueError as e:  # oh, we failed then
