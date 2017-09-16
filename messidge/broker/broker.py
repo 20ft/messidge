@@ -26,7 +26,7 @@ from .message import BrokerMessage
 
 
 class Broker:
-    def __init__(self, keys, identity, model, node_create_callback, session_create_callback, controller, commands, *,
+    def __init__(self, keys, identity, model, node_type, session_type, controller, commands, *,
                  base_port=2020, pre_run_callback=None, session_recovered_callback=None, session_destroy_callback=None):
         """Initialise with location and the private/secret key pair"""
         # Basic structure
@@ -34,8 +34,8 @@ class Broker:
         self.model = model
         self.controller = controller
         self.commands = commands
-        self.node_create_callback = node_create_callback
-        self.session_create_callback = session_create_callback
+        self.node_type = node_type
+        self.session_type = session_type
         self.session_recovered_callback = session_recovered_callback
         self.session_destroy_callback = session_destroy_callback
         self.pre_run_callback = pre_run_callback
@@ -176,7 +176,7 @@ class Broker:
                 self.session_recovered_callback(session, msg.params['rid'])
         else:
             # if an alias is connecting then it will need the original pk to be used because encryption
-            session = self.session_create_callback(msg.rid, pk, msg.params['nonce'])
+            session = self.session_type(msg.rid, pk, msg.params['nonce'])
             self.model.sessions[msg.rid] = session
             resources = self.model.resources(pk)
 
@@ -219,7 +219,7 @@ class Broker:
 
         except KeyError:
             # a node connecting for the first time
-            node = self.node_create_callback(pk, msg, config)
+            node = self.node_type(pk, msg, config)
             self.model.nodes[pk] = node
             self.node_rid_pk[msg.rid] = pk
             self.node_pk_rid[pk] = msg.rid
