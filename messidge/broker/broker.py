@@ -354,25 +354,12 @@ class Broker:
                 self.local_replies[msg.uuid](msg)
                 return
 
-            # validate data if it hasn't come from a node
-            if msg.rid not in self.node_rid_pk:
-
-                # if there is a claim to be a certain user it needs validating
-                if 'user' in msg.params:
-                    if not isinstance(msg.params['user'], bytes):
-                        raise ValueError("Send user pk in binary")
-                    user = b64encode(msg.params['user']).decode()
-                    if msg.rid not in self.rid_agent:
-                        raise ValueError("Claimed user not initialised: " + user)
-                    if self.rid_agent[msg.rid].pk != msg.params['user']:
-                        raise ValueError("Claimed user pk is wrong: " + user)
-                    logging.debug("Validated claim to be user: " + user)
-
-                # if there is a claim to be a certain session it needs validating
-                if 'session' in msg.params:
-                    if msg.params['session'] != msg.rid:
-                        raise ValueError("Claimed session value is wrong: " + str(msg.command))
-                    logging.debug("Validated claim to be session: " + str(msg.params['session']))
+            # no we're either dealing with a command or forwarding it to the node so let's add some context
+            if msg.rid in self.rid_agent:
+                msg.params['user'] = self.rid_agent[msg.rid].pk
+                msg.params['session'] = msg.rid
+            if msg.rid in self.node_rid_pk:
+                msg.params['node'] = self.node_rid_pk[msg.rid]
 
             # if this is a message that laksa can deal with, call the controller
             if msg.command in self.commands:
@@ -382,14 +369,18 @@ class Broker:
 
             # forwarding to the node
             try:
+                # cache node_pk (don't need to send this to the node itself)
                 node_pk = msg.params['node']
-                del msg.params['node']  # don't need to send this to the node itself
-                # record the source rid to reply the message to
+                del msg.params['node']  #
+
+                # record the source rid so we can forward replies
                 if msg.replyable():
                     self.forward_replies[msg.uuid] = msg.rid
+
                 # set the rid to the node and forward
                 msg.rid = self.node_pk_rid[node_pk]
                 msg.forward_socket(self.skt)
+
             except KeyError:
                 raise ValueError("No node address or invalid: " + str(msg.command))
 
@@ -404,15 +395,13 @@ class Broker:
 
     def _check_basic_properties(self, msg):
         """Helper utility to bounce missing/clearly-wrong properties before they do a bad thing"""
-
-        # is this a broker command, is it expecting a reply and can we send it?
+        # is it expecting a reply and can we send it?
         try:
             necessary_params, needs_reply, node_only = self.commands[msg.command]
-            if needs_reply:
-                msg.raise_if_cant_reply()
-            if node_only:
-                if msg.rid not in self.node_rid_pk:
-                    raise ValueError("This call is for nodes only")
+            if needs_reply and not msg.replyable():
+                raise ValueError("Message needs to be replyable for: " + str(msg.command))
+            if node_only and msg.rid not in self.node_rid_pk:
+                raise ValueError("This call is for nodes only")
         except KeyError:
             # not a broker command, assume passing through (node value has already been checked)
             return  # no need to check params, we know message is not for the broker
@@ -477,4 +466,6 @@ class ControllerMinimal:
 
 
 def cmd(required_params, *, needs_reply=False, node_only=False):
+    if 'user' in required_params or 'session' in required_params:
+        raise RuntimeError('"user" and "session" are reserved parameter names')
     return required_params, needs_reply, node_only

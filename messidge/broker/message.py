@@ -76,11 +76,6 @@ class BrokerMessage:
         """Returns true if this message can be replied to (has a uuid)"""
         return self.uuid != b''
 
-    def raise_if_cant_reply(self):
-        """Raises a ValueError (passed back to client) if this message can't be replied to"""
-        if not self.replyable():
-            raise ValueError("Command needs a uuid to reference the results")
-
     def reply(self, results=None, bulk=None):
         """Called on an existing message, presumably a command to provide the results"""
         # You can store a message and call reply more than once
