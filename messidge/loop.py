@@ -25,11 +25,11 @@ from .client.message import Message
 
 class Loop:
 
-    def __init__(self, skt, message_type=Message):
+    def __init__(self, skt=None, message_type=Message):
         """Initialise (but not start) a message loop.
 
-        skt is the zeromq socket that connects to the location.
-        message_type can be set to customise the Message class."""
+        :param skt: the (actually optional) ZMQ socket that connects to the location.
+        :param message_type: optionally set to use a non-default message class."""
         super().__init__()
         self.exclusive_handlers = {}
         self.reply_callbacks = {}
@@ -48,12 +48,21 @@ class Loop:
             self.p.register(skt, zmq.POLLIN)  # so register_reply will work even if we don't register anything else
             logging.debug("Message loop has registered trunk socket")
 
-    def set_crypto_params(self, nonce, session_key):
+    def set_crypto_params(self, nonce: bytes, session_key: bytes):
+        """Sets the cryptographic parameters for this connection.
+
+        :param nonce: The n-once for this connection.
+        :param session_key: The session key for this connection.
+        """
         self.nonce = nonce
         self.session_key = session_key
 
-    def register_exclusive(self, obj, handler, comment=""):
-        """Registers an object and an object.handler that gets called to receive all events."""
+    def register_exclusive(self, obj, handler, *, comment: str=""):
+        """Registers an object and handler called to receive all events received on a ZMQ socket or file descriptor.
+
+        :param obj: the object that will receive events.
+        :param handler: the handler that will be called - passed the zmq socket or file handler (int).
+        :param comment: an optional comment for clarifying debug logs."""
         # function signature: def callback(self, socket)
         # object can be a zmq socket or a file descriptor
         if obj in self.exclusive_handlers:
@@ -66,6 +75,9 @@ class Loop:
         logging.debug("Message loop has registered exclusive: " + comment)
 
     def unregister_exclusive(self, obj):
+        """Unregister an object as an exclusive handler.
+
+        :param obj: The object to unregister."""
         try:
             del self.exclusive_handlers[obj]
             self.p.unregister(obj)
@@ -73,9 +85,13 @@ class Loop:
         except KeyError:
             logging.warning("Tried to unregister a socket that was not registered (exclusive): " + str(obj))
 
-    def register_commands(self, skt, obj, commands, comment=""):
-        """Register command callbacks directly."""
-        # A single shot per socket. Pass commands as {'name': _callback, ... }
+    def register_commands(self, skt, obj, commands, *, comment: str=""):
+        """Register command callbacks.
+
+        :param skt: ZMQ socket that will receive the events.
+        :param obj: The object that will handle the events.
+        :param commands: A dictionary of {b'command': handler, ...}.
+        :param comment: A string to help clarify debug logs."""
         if skt in self.exclusive_handlers:
             raise RuntimeError("Socket is already registered as exclusive")
         if skt in self.command_handlers:
@@ -87,47 +103,63 @@ class Loop:
         else:
             logging.debug("Not registering with poll twice (commands): " + str(skt))
 
-    def register_reply(self, command_uuid, callback):
-        """Hooking the reply to a command. Note that this will not override an exclusive socket."""
+    def register_reply(self, command_uuid: bytes, callback):
+        """Hooking the reply to a command. Note that this will not override an exclusive socket.
+
+        :param command_uuid: the uuid of the command message from which we are expecting a reply.
+        :param callback: the callback that gets sent the reply message when it arrives."""
         if callback is not None:
             self.reply_callbacks[command_uuid] = callback
         else:
             raise RuntimeError("Tried to register a reply for a command but passed None for the callback")
 
-    def unregister_reply(self, command_uuid):
-        """Removing the reply hook"""
+    def unregister_reply(self, command_uuid: bytes):
+        """Removing the hook for a command reply.
+
+        :param command_uuid: the uuid of the command message from which we are no longer expecting a reply."""
         try:
             del self.reply_callbacks[command_uuid]
         except KeyError:
             logging.debug("Called unregister_reply for a uuid that isn't hooked")
 
     def register_on_idle(self, obj):
+        """Register an object.method to be called whenever the message loop has idle time.
+
+        :param obj: The object.method to be called - no additional parameters are passed."""
         """Idles get invoked every time the poll on the message loop times out (ie has nothing to do)"""
         if obj not in self.idle:
             self.idle.add(obj)
 
     def unregister_on_idle(self, obj):
+        """Unregister an object.method from the message loop's idle time.
+
+        :param obj: The object.method to be unregistered."""
         if obj in self.idle:
             self.idle.remove(obj)
 
     def on_value_error(self, callback):
-        """Register an alternative to raising exceptions for ValueError exceptions coming over the wire"""
+        """Register an alternative to raising exceptions for ValueError exceptions coming over the wire.
+
+        :param callback: the callback to be fired, gets passed the exception and message that caused the exception."""
         self.value_error_handler = callback
 
     def stop(self):
-        """Stops the message loop."""
+        """Causes the thread in 'run' to exit cleanly (eventually)."""
         if self.running_thread is None:
             return
         self.running_thread = None
 
     @staticmethod
     def check_basic_properties(msg, handler):
-        """Helper utility to bounce messages that are missing properties before they do a bad thing"""
-        necessary_params = handler[0]
+        """Helper utility to ensure messages fulfill certain basic criteria before they are passed to their handlers.
+
+        :param msg: the message to be tested.
+        :param handler: the handler (a return from client.connection.cmd) to be tested for."""
+        necessary_params, needs_reply = handler
         for necessary in necessary_params:
             if necessary not in msg.params:
                 raise ValueError("Necessary parameter was not passed: " + necessary)
-        if handler[1] and not msg.replyable():
+        if needs_reply and not msg.replyable():
             raise ValueError("This command needs to be replyable but the message was not: " + str(msg))
 
     def run(self):

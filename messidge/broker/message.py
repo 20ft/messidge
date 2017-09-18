@@ -17,8 +17,8 @@ import logging
 
 
 class BrokerMessage:
-    """The server side message, markedly different to their client side equivalent"""
-    # For instance, they actually have a destination
+    """The server side message, markedly different to it's client side equivalent"""
+    # For instance, it actually has a destination
 
     def __init__(self):
         self.is_encrypted = None
@@ -32,7 +32,7 @@ class BrokerMessage:
 
     @staticmethod
     def receive_socket(socket):
-        """Receive a message from the socket."""
+        # Receive a message from the socket.
         # nonce and session_key are only here for compatibility with the loop, not actually used
         parts = socket.recv_multipart(copy=False)
 
@@ -54,7 +54,7 @@ class BrokerMessage:
 
     @staticmethod
     def receive_pipe(pipe, encrypted=False):
-        """Receive a message from a multiprocessing pipe"""
+        # Receive a message from a multiprocessing pipe
         parts = pipe.recv()
 
         if len(parts) != 5:
@@ -73,11 +73,11 @@ class BrokerMessage:
         return rtn
 
     def replyable(self):
-        """Returns true if this message can be replied to (has a uuid)"""
+        # Returns true if this message can be replied to (has a uuid)
         return self.uuid != b''
 
     def reply(self, results=None, bulk=None):
-        """Called on an existing message, presumably a command to provide the results"""
+        # Called on an existing message, presumably a command to provide the results
         # You can store a message and call reply more than once
         if results is None:
             results = {}
@@ -106,7 +106,6 @@ class BrokerMessage:
         raise RuntimeError("Attempted to forward a message without setting either emit pipe or socket")
 
     def encrypt(self, nonce, session_key):
-        """Encrypt the parameters"""
         if self.is_encrypted:
             return
         params_binary = cbor.dumps(self.params)
@@ -116,7 +115,6 @@ class BrokerMessage:
         self.is_encrypted = True
 
     def decrypt(self, nonce, session_key):
-        """Decrypt the parameters"""
         if not self.is_encrypted:
             return
         try:
@@ -138,7 +136,7 @@ class BrokerMessage:
 
     @staticmethod
     def send_socket(socket, rid, command, uuid, params, bulk=b''):
-        """Send a message to a client - easier to call send_cmd on the broker"""
+        # Send a message to a client - easier to call send_cmd on the broker
         parts = BrokerMessage._parts_to_send(rid, command, uuid, cbor.dumps(params), bulk)
         socket.send_multipart(parts)
         BrokerMessage._log("BrokerMessage.send_socket", rid, command, uuid, params)
@@ -159,7 +157,7 @@ class BrokerMessage:
 
     @staticmethod
     def _log(words, rid, command, uuid, params):
-        """Logs a message being sent, received etc."""
+        # Logs a message being sent, received etc.
         # Needs logging level DEBUG and even then it only sends to STDOUT
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             param_string = "-encrypted-"

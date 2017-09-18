@@ -29,17 +29,22 @@ from ..loop import Loop
 
 
 class Connection:
-    """Connection onto a messidge server."""
-    # Is expecting ~/.20ft/ to contain keys named after the location to connect to (eg)
-
-    # skt is the main tcp socket from here to the location and belongs to the background thread
+    """Connection onto a messidge broker."""
+    # Runs a background loop
+    # skt is the main tcp socket from here to the broker and belongs to the background thread
     # x_thread_socket is the "pickup" end of the per-thread sending sockets forwards to skt
     # Note that messages received are exclusively dealt with on the background thread
 
-    def __init__(self, location: str=None, prefix='~/.messidge', location_ip: str=None,
+    def __init__(self, location: str=None, prefix='~/.messidge', *, location_ip: str=None,
                  keys: KeyPair=None, server_pk: str=None):
+        """Instantiate a connection.
+
+        :param location: The FQDN of the location to connect to.
+        :param prefix: Directory for the client keys and server public keys.
+        :param location_ip: An override for the DNS resolution of 'location'. Useful for LAN and/or test connections.
+        :param keys: An override for the key pair in the 'prefix' directory.
+        :param server_pk: An override for the server public key in the 'prefix' directory."""
         super().__init__()
-        """Instantiate a connection, using the location to connect to (fqdn)"""
         # location_ip is an alternative (local) ip or name.local
         self.connect_ip = location_ip if location_ip is not None else location
         self.location = location if location is not None else self.connect_ip
@@ -84,21 +89,23 @@ class Connection:
         start_new_thread(self._start, ())
 
     def wait_until_ready(self, timeout=120):
-        """Blocks waiting for the connection to be ready to use"""
+        """Blocks waiting for the connection to be ready to use.
+
+        :param timeout: in seconds."""
         self.ready_lock.acquire(timeout=timeout)
         self.ready_lock.release()
         self._maybe_raise()
         return self
 
     def wait_until_finished(self):
-        """Blocks until the message loop exits"""
+        """Blocks until the message loop exits."""
         self.finished_block.acquire()
         self.finished_block.release()
         self._maybe_raise()
         return self
 
     def disconnect(self):
-        """Stop the message loop and disconnect - without this object cannot be garbage collected"""
+        """Stop the message loop and disconnect - without this object cannot be garbage collected."""
         self._maybe_raise()
         self.loop.stop()
         for skt in self.thread_skt.values():
@@ -109,7 +116,7 @@ class Connection:
         self.uuid_blockresults.clear()
 
     def _start(self):
-        """The message loop runs on a background thread"""
+        # The message loop runs on a background thread
         self.loop_thread = get_ident()
 
         # create the trunk socket - remember sockets must be created on the thread they are used on
@@ -129,8 +136,8 @@ class Connection:
 
         # kick off a message loop - has to be constructed on background thread
         self.loop = Loop(self.skt)
-        self.loop.register_exclusive(self.skt_monitor, self._socket_event, "Socket events")
-        self.loop.register_exclusive(self.x_thread_receive, self._fast_forward, "Cross thread socket")
+        self.loop.register_exclusive(self.skt_monitor, self._socket_event, comment="Socket events")
+        self.loop.register_exclusive(self.x_thread_receive, self._fast_forward, comment="Cross thread socket")
         self.loop.run()  # blocks until loop.stop is called
 
         # Maybe the main thread is in send_blocking_cmd
@@ -186,8 +193,8 @@ class Connection:
             callback(self.rid)
         self.ready_lock.release()
 
-    def send_skt(self):
-        """Allocates (if necessary) a socket for this thread to send messages to"""
+    def send_skt(self) -> zmq.Socket:
+        """Allocates (if necessary) a socket for this thread to send messages to."""
         thread = get_ident()
 
         # if this is the loop thread then we can use the main thread socket to send
@@ -205,7 +212,7 @@ class Connection:
             return new_skt
 
     def destroy_send_skt(self):
-        """Closes and removes the send_skt for this thread"""
+        """Closes and removes the send_skt for this thread."""
         thread = get_ident()
         try:
             self.thread_skt[thread].close()
@@ -214,15 +221,17 @@ class Connection:
         except KeyError:
             pass
 
-    def send_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', uuid=b'', reply_callback=None):
-        """Sends a command to the location, can route replies.
+    def send_cmd(self, cmd: bytes, params=None, *, bulk: bytes=b'', uuid=b'', reply_callback=None):
+        """Send command to broker
 
-           cmd is a binary string i.e. b'map'
-           params are usually a dictionary of values but can also be a list (or None)
-           bulk is for passing blobs
-           reply_callback gives the object.method to call on the background thread when the command receives a reply
+        :param cmd: the command.
+        :param params: A {'key': 'value'} dictionary of parameters or ['list'].
+        :param bulk: An optional piece of bulk data to transport.
+        :param uuid: A uuid to attach to this command (so it can reply).
+        :param reply_callback: Callback to fire when the command receives a reply - gets passed the message.
         """
         self._maybe_raise()
+
         # BS check
         if self.loop is None:
             raise RuntimeError("The connection has no message loop - _start has not been called.")
@@ -238,13 +247,14 @@ class Connection:
 
         Message.send(self.send_skt(), cmd, self.nonce, self.session_key, params, uuid=uuid, bulk=bulk)
 
-    def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=30) -> Message:
-        """Sends a command to the location, blocks and waits for a reply or timeout.
+    def send_blocking_cmd(self, cmd: bytes, params=None, *, bulk: bytes=b'', timeout: float=30) -> Message:
+        """Send command to broker, blocks waiting for reply.
 
-           cmd is a binary string i.e. b'map'
-           params are usually a dictionary of values but can also be a list (or None)
-           bulk is for passing blobs
-           returns the reply message
+        :param cmd: the command.
+        :param params: A {'key': 'value'} dictionary of parameters or ['list'].
+        :param bulk: An optional piece of bulk data to transport.
+        :param timeout: In seconds.
+        :return: The reply message.
         """
         on_loop_thread = self._maybe_raise()
         if on_loop_thread:
@@ -270,28 +280,35 @@ class Connection:
         self._maybe_raise()
         return msg
 
-    def register_commands(self, obj, commands):
-        """Register a list of commands to be handled by the loop."""
+    def register_commands(self, obj, commands: dict):
+        """Register a list of commands to be handled by the loop.
+
+        :param obj: The object that will handle the commands.
+        :param commands: A dict of the form {b'command': handler, ...}."""
         while self.loop is None:
             os.sched_yield()  # loop creation has not yet had a timeslice
         self.loop.register_commands(self.skt, obj, commands)
 
     def register_connect_callback(self, callback):
+        """Register a callback to be fired once the connection is complete.
+
+        :param callback: the object.method to call - is passed the connection rid."""
         self.connect_callbacks.add(callback)
 
     def unregister_connect_callback(self, callback):
+        """Unregister a callback to be fired once the connection is complete.
+
+        :param callback: the object.method to cancel."""
         try:  # may have already been disconnected as part of object shutting down
             self.connect_callbacks.remove(callback)
         except KeyError:
             pass
 
     def location_name(self) -> str:
-        """Outside access to the name/address of this location."""
-        return self.location
+        """Outside access to the name/address of this location.
 
-    def pk(self) -> bytes:
-        """Outside access to this connection's public key."""
-        return self.keys.public
+        :return: The FQDN of the location as a string."""
+        return self.location
 
     def _fast_forward(self, skt):
         parts = skt.recv_multipart()
@@ -306,13 +323,15 @@ class Connection:
             logging.error("Message from a blocking call arrived late (ignored): " + str(msg))
 
     def unblock_and_raise(self, exception):
-        # releases the lock but causes the thread in 'wait_until_ready' to raise an exception
+        """Causes the thread in 'wait_until_ready' to raise an exception.
+
+        :param exception: the exception to be raised."""
         self.exception = exception
         if self.ready_lock.locked():
             self.ready_lock.release()
 
     def _maybe_raise(self):
-        """See if the message loop captured an exception"""
+        # See if the message loop captured an exception
         # returns bool for whether or not you're on the loop thread
         thread = get_ident()
         if thread == self.loop_thread:
@@ -330,3 +349,12 @@ class Connection:
     def __repr__(self):
         return "<messidge.connection.Connection object at %s (location=%s)>" % (id(self), self.location)
 
+
+def cmd(required_params: list, *, needs_reply: bool=False) -> (list, bool):
+    """Create the internal structure describing a command
+
+    :param required_params: A list of parameters that must be included with the command.
+    :param needs_reply: The message needs to be replied to (and must have a uuid)."""
+    if 'user' in required_params or 'session' in required_params:
+        raise RuntimeError('"user" and "session" are reserved parameter names')
+    return required_params, needs_reply

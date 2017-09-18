@@ -21,14 +21,25 @@ from .identity import Identity, AccountConfirmationServer
 from .agent import Agent
 from .auth import Authenticate
 
+from .. import KeyPair
 from ..loop import Loop
 from .message import BrokerMessage
 
 
 class Broker:
-    def __init__(self, keys, model, node_type, session_type, controller, *,
-                 base_port=2020, pre_run_callback=None, session_recovered_callback=None, session_destroy_callback=None):
-        """Initialise with location and the private/secret key pair"""
+    def __init__(self, keys: KeyPair, model, node_type, session_type, controller, *, base_port: int=2020,
+                 pre_run_callback=None, session_recovered_callback=None, session_destroy_callback=None):
+        """Initialise the broker.
+
+        :param keys: Server public/secret keys.
+        :param model: Model object (derived from ModelMinimal).
+        :param node_type: Class to construct node objects with (derived from NodeMinimal).
+        :param session_type: Class to construct session objects with (derived from SessionMinimal).
+        :param controller: Controller object (derived from ControllerMinimal).
+        :param base_port: TCP port to use plus the next one (so default is 2020 and 2021).
+        :param pre_run_callback: Fired last thing before the message loop starts.
+        :param session_recovered_callback: Fired with the new rid when a session reconnects.
+        :param session_destroy_callback: Fired last thing before a session is destroyed."""
         # Basic structure
         self.keys = keys
         self.model = model
@@ -59,7 +70,7 @@ class Broker:
         zmq.Context.instance().set(zmq.IO_THREADS, os.cpu_count())
 
     def run(self):
-        """Call on the main thread, creates the 'background' thread that actually does all the work."""
+        """Call on the main thread, creates the background thread that actually does all the work."""
         # the server socket
         self.skt = zmq.Context.instance().socket(zmq.ROUTER)
         self.skt.set_hwm(0)  # infinite, don't drop or block because that would be bad
@@ -72,8 +83,8 @@ class Broker:
 
         # Set up the message loop
         self.loop = Loop(self.skt, message_type=BrokerMessage)
-        self.loop.register_exclusive(self.skt, self._event_socket, "Events")
-        self.loop.register_exclusive(self.skt.get_monitor_socket(), self._monitor, "Socket monitor for events")
+        self.loop.register_exclusive(self.skt, self._event_socket, comment="Events")
+        self.loop.register_exclusive(self.skt.get_monitor_socket(), self._monitor, comment="Socket monitor for events")
 
         # Client hookups...
         if self.pre_run_callback is not None:
@@ -84,11 +95,20 @@ class Broker:
         self.loop.run()
 
     def stop(self):
+        """Stop background threads. Must be called to allow garbage collection and for a clean exit."""
         self.identity.stop()  # confirmation server just bins out when we exit (a daemon thread)
         self.loop.stop()
 
-    # sending a fresh command
-    def send_cmd(self, rid, cmd, params=None, bulk=b'', uuid=b'', local_reply=None):
+    def send_cmd(self, rid, command: bytes, params: dict, *, bulk: bytes=b'', uuid: bytes= b'', local_reply=None):
+        """Send command to either a node or user
+
+        :param rid: the routing identifier to send the message to.
+        :param command: a byte string of the command to send.
+        :param params: A {'key': 'value'} dictionary of parameters to send.
+        :param bulk: An optional piece of bulk data to transport.
+        :param uuid: A uuid to attach to this command (so it can reply).
+        :param local_reply: A local reply target (ie. don't message pass).
+        """
         if local_reply is not None and uuid is not b'':
             self.local_replies[uuid] = local_reply
         try:
@@ -97,23 +117,27 @@ class Broker:
             logging.warning("Failed sending command, no agent for rid: " + str(rid))
             return
         if agent is None:
-            BrokerMessage.send_socket(self.skt, rid, cmd, uuid, params, bulk)
+            BrokerMessage.send_socket(self.skt, rid, command, uuid, params, bulk)
         else:
-            BrokerMessage.send_pipe(agent.encrypt_pipe[0], rid, cmd, uuid, params, bulk)
+            BrokerMessage.send_pipe(agent.encrypt_pipe[0], rid, command, uuid, params, bulk)
 
-    # give the next connection a unique (but known) routing id
     def set_next_rid(self):
-        """Set the routing id for the next socket that connects"""
+        """Set the routing id for the next socket that connects."""
+        # gives the next connection a unique (but known) routing id
         self.next_connection_rid = bytes([random.randint(0, 255) for _ in range(0, 4)])
         logging.debug("Set next rid to: " + str(self.next_connection_rid))
         self.skt.set(zmq.CONNECT_RID, self.next_connection_rid)
 
-    def disconnect_for_rid(self, rid, is_definitely_user=False):
+    def disconnect_for_rid(self, rid, *, is_definitely_user=False):
+        """Disconnect a client.
+
+        :param rid: routing id for the client to disconnect.
+        :param is_definitely_user: forces a user to be disconnected even if the agent has gone already."""
         # Remove the crypto agent
         agent = None
         try:
             agent = self.rid_agent[rid]
-            del self.rid_agent[rid]  # both users and nodes have rid_agent mappings (nodes are just None)
+            del self.rid_agent[rid]  # both users and nodes have rid_agent mappings (nodes map to None)
             if agent is not None:  # a user
                 agent.stop()
                 agent.join()
@@ -188,9 +212,9 @@ class Broker:
         # we register the filenumber because zmq.poll won't poll a pipe object (but it will for a descriptor)
         agent = Agent(msg.rid, pk, msg.params['nonce'])
         self.loop.register_exclusive(agent.encrypt_pipe[0].fileno(),
-                                     self._emit_encrypted, "Encryption pipe, agent=" + str(msg.rid))
+                                     self._emit_encrypted, comment="Encryption pipe, agent=" + str(msg.rid))
         self.loop.register_exclusive(agent.decrypt_pipe[0].fileno(),
-                                     self._event_pipe, "Decryption pipe, agent=" + str(msg.rid))
+                                     self._event_pipe, comment="Decryption pipe, agent=" + str(msg.rid))
         self.fd_pipe[agent.encrypt_pipe[0].fileno()] = agent.encrypt_pipe[0]
         self.fd_pipe[agent.decrypt_pipe[0].fileno()] = agent.decrypt_pipe[0]
         logging.debug("Encrypt pipe for rid: %s -> %s" % (str(msg.rid), agent.encrypt_pipe[0].fileno()))
@@ -231,7 +255,7 @@ class Broker:
         return None
 
     def _monitor(self, skt):
-        """Catches the file descriptor opening and closing"""
+        # Catches the file descriptor opening and closing
         evt = recv_monitor_message(skt)
         descriptor = evt['value']
         if evt['event'] == zmq.EVENT_ACCEPTED:  # the handshake will sort itself out
@@ -264,7 +288,7 @@ class Broker:
         logging.info("Node disconnected: " + b64encode(pk).decode())
 
     def _disconnect_user(self, rid):
-        """Disconnect a single session - fires a callback"""
+        # Disconnect a single session - fires a callback
         try:
             sess = self.model.sessions[rid]
         except KeyError:
@@ -331,7 +355,6 @@ class Broker:
         self._event(msg)
 
     def _event(self, msg):
-        """Top level handler for incoming events"""
         # at this point we know the message is plaintext and will have either emit_pipe or emit_socket set
         # ensure we have all the necessary parameters then forward, call the handler, validate, whatever
         try:
@@ -394,7 +417,8 @@ class Broker:
                 raise e
 
     def _check_basic_properties(self, msg):
-        """Helper utility to bounce missing/clearly-wrong properties before they do a bad thing"""
+        # Helper utility to bounce missing/clearly-wrong properties before they do a bad thing
+
         # is it expecting a reply and can we send it?
         try:
             necessary_params, needs_reply, node_only = self.commands[msg.command]
@@ -411,7 +435,8 @@ class Broker:
             if necessary not in msg.params:
                 raise ValueError("Necessary parameter was not passed: " + necessary)
 
-    def _emit_encrypted(self, fd):  # called when pipe 'fd' has an encrypted message ready to send
+    def _emit_encrypted(self, fd):
+        # called when pipe 'fd' has an encrypted message ready to send
         try:
             pipe = self.fd_pipe[fd]
             parts = pipe.recv()
@@ -424,48 +449,12 @@ class Broker:
         return "<messidge.broker.Broker object at %x>" % id(self)
 
 
-class ModelMinimal:
-    def __init__(self):
-        self.nodes = {}
-        self.sessions = {}
-
-    # overload if you want to make a resource offer to the client
-    def resources(self, pk):
-        return None
-
-    # overload these if you want to make persistent sessions
-    def create_session_record(self, sess):
-        pass
-
-    def update_session_record(self, sess):
-        pass
-
-    def delete_session_record(self, sess):
-        pass
-
-
-class NodeMinimal:
-    def __init__(self, pk):
-        self.pk = pk
-
-
-class SessionMinimal:
-    def __init__(self, rid, pk, nonce):
-        self.rid = rid
-        self.pk = pk
-        self.nonce = nonce
-        self.old_rid = rid  # for use with reconnection
-
-    # overload to free resources - can use passed broker to send commands to nodes
-    def close(self, broker):
-        pass
-
-
-class ControllerMinimal:
-    commands = {}
-
-
 def cmd(required_params, *, needs_reply=False, node_only=False):
+    """Create the internal structure describing a command
+
+    :param required_params: A list of parameters that must be included with the command.
+    :param needs_reply: The message needs to be replied to (and must have a uuid).
+    :param node_only: The message can only have originated from a node."""
     if 'user' in required_params or 'session' in required_params:
         raise RuntimeError('"user" and "session" are reserved parameter names')
     return required_params, needs_reply, node_only

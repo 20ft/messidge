@@ -11,7 +11,7 @@ from base64 import b64encode
 class Authenticate:
 
     def __init__(self, identity, keys):
-        """Create an authentication object when passed location and (our) keys"""
+        # Create an authentication object when passed location and (our) keys
         self.identity = identity
         self.keys = keys
 
@@ -19,7 +19,7 @@ class Authenticate:
         logging.debug("Authenticator closed")
 
     def auth(self, msg):
-        """Authenticate against config"""
+        # Authenticate against config
         # Returns success, user, config
         try:
             pk = b64encode(msg.params['user']).decode()  # the database holds base64 encoded strings for sanity

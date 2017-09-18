@@ -13,7 +13,7 @@ from litecache.cache import SqlCache
 
 ident_init = """
 CREATE TABLE nodes (pk TEXT NOT NULL UNIQUE, json BLOB);
-CREATE TABLE users (pk TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE, json BLOB);
+CREATE TABLE users (pk TEXT NOT NULL UNIQUE, email TEXT NOT NULL, json BLOB);
 CREATE TABLE pending (token TEXT NOT NULL UNIQUE, email TEXT NOT NULL);
 """
 
@@ -25,34 +25,56 @@ class Identity:
     def stop(self):
         self.db.close()
 
-    def raise_for_no_user(self, email):
-        """Raises an error if this email address does not have an account"""
-        self.db.query_one("SELECT * FROM users WHERE email=?", (email,), "no validated account")
+    def create_pending_user(self, email) -> str:
+        """Registers the intention for someone to become a registered user
 
-    def create_pending_user(self, email):
-        """Registers the intention for someone to become a registered user"""
+        :param email: email address of the user.
+        :return: confirmation token to give to the user."""
         token = shortuuid.uuid()
-        self.db.async("INSERT INTO pending (token, email) VALUES (?, ?);", (token, email))
+        self.db.async("INSERT INTO pending (token, email) VALUES (?, ?)", (token, email))
         return token
 
-    def pending_users_for_token(self, token):
-        """Return the pending users for the given token (may well be zero)"""
+    def pending_users_for_token(self, token) -> []:
+        """Return the pending users for the given token (may well be zero).
+
+        :param token: the token a user was given in order to be able to confirm their account.
+        :return: The list of pending users for that token."""
         return self.db.query("SELECT email FROM pending WHERE token=?", (token,))
 
-    def register_user(self, pk_b64, email, params):
-        """Registers a user as being valid"""
+    def register_user(self, pk_b64: str, email: str, config: str):
+        """Registers a user as being valid.
+
+        :param pk_b64: The user's primary key - base64 encoded string.
+        :param email: The user's email address.
+        :param config: A json description of any configuration to be associated with the user."""
         self.db.async("DELETE FROM pending WHERE email=?", (email,))
-        self.db.async("INSERT INTO users (pk, email, json) VALUES (?, ?, ?);", (pk_b64, email, params))
-    def user_config_from_db(self, pk_b64):  # is used to check for presence in the db, too
-        """Returns the json for pk (if there)"""
+        self.db.async("INSERT INTO users (pk, email, json) VALUES (?, ?, ?)", (pk_b64, email, config))
+
+    def user_config_from_db(self, pk_b64: str) -> (str, str):  # is used to check for presence in the db, too
+        """Returns the json configuration for a user.
+
+        :param pk_b64: The user's primary key - base64 encoded string.
+        :return: A tuple of email address and the json configuration."""
         return self.db.query_one("SELECT email, json FROM users WHERE pk=?", (pk_b64,), "Unknown user")
 
-    def register_node(self, pk_b64, params):
-        """Writes a node's parameters into the config database"""
-        self.db.async("INSERT OR REPLACE INTO nodes (pk, json) VALUES (?, ?);", (pk_b64, params))
+    def raise_for_no_user(self, email: str):
+        """Raises an error if this email address does not have an account.
 
-    def node_config_from_db(self, pk_b64):
-        """Returns json of the node's parameters"""
+        :param email: email address of the user."""
+        self.db.query_one("SELECT * FROM users WHERE email=?", (email,), "no validated account")
+
+    def register_node(self, pk_b64: str, config: str):
+        """Writes a node's configuration into the database.
+
+        :param pk_b64: The node's primary key - base64 encoded string.
+        :param config: A json description of any configuration to be associated with the node."""
+        self.db.async("INSERT INTO nodes (pk, json) VALUES (?, ?)", (pk_b64, config))
+
+    def node_config_from_db(self, pk_b64: str) -> str:
+        """Returns the json configuration of a node.
+
+        :param pk_b64: The node's primary key - base64 encoded string.
+        :return: The json configuration for the node."""
         return self.db.query_one("SELECT json FROM nodes WHERE pk=?", (pk_b64,), "Unknown node")[0]
 
 
