@@ -43,7 +43,7 @@ print("This will print before the async callback is triggered...")
 try:
     conn.send_blocking_cmd(b'raise_exception')
 except ValueError as e:
-    print("ValueError raised because: " + str(e))
+    print("Expected! ValueError raised because: " + str(e))
 
 # get the nodes to do something for us by passing their public key
 for node_pk in controller.nodes:
@@ -53,6 +53,6 @@ for node_pk in controller.nodes:
     try:
         conn.send_blocking_cmd(b'divide', {'node': node_pk, 'dividend': 10.0, 'devisor': 0.0})
     except ValueError as e:
-        print("ValueError raised because: " + str(e))
+        print("Expected! ValueError raised because: " + str(e))
 
 conn.disconnect()
