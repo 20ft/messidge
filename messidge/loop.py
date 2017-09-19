@@ -13,7 +13,6 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 """
 
 import logging
-import sys
 import time
 import traceback
 from _thread import get_ident
@@ -96,12 +95,12 @@ class Loop:
             raise RuntimeError("Socket is already registered as exclusive")
         if skt in self.command_handlers:
             raise RuntimeError("Tried to register a series of commands twice for the same socket")
+        for command in commands.keys():
+            if not isinstance(command, bytes):
+                raise RuntimeError("Pass commands as bytes, not strings")
         self.command_handlers[skt] = (obj, commands)
         if skt is not self.skt:  # OK to reclassify the existing socket but no OK to re-register it
             self.p.register(skt, zmq.POLLIN)
-            logging.debug("Message loop has registered for commands: " + str(skt) + " " + comment)
-        else:
-            logging.debug("Not registering with poll twice (commands): " + str(skt))
 
     def register_reply(self, command_uuid: bytes, callback):
         """Hooking the reply to a command. Note that this will not override an exclusive socket.
@@ -233,11 +232,13 @@ class Loop:
                             continue
                         try:
                             handler = handlers[msg.command]
-                            logging.debug("Handling command: " + str(msg.command))
-                            Loop.check_basic_properties(msg, handler)
-                            getattr(obj, '_' + msg.command.decode())(msg)
                         except KeyError:
                             logging.warning("No handler was found for: %s (uuid=%s)" % (msg.command, msg.uuid))
+                            continue
+
+                        logging.debug("Handling command: " + str(msg.command))
+                        Loop.check_basic_properties(msg, handler)
+                        getattr(obj, '_' + msg.command.decode())(msg)
 
                     except ValueError as e:
                         if self.value_error_handler:

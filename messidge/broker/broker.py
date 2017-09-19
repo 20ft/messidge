@@ -202,7 +202,7 @@ class Broker:
             # if an alias is connecting then it will need the original pk to be used because encryption
             session = self.session_type(msg.rid, pk, msg.params['nonce'])
             self.model.sessions[msg.rid] = session
-            resources = self.model.resources(pk)
+            resources = self.model.resources(self, pk)
 
         self.model.sessions[msg.rid] = session
         self.model.create_session_record(session)

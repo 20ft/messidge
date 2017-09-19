@@ -24,14 +24,18 @@ import shortuuid
 import zmq
 from zmq.utils.monitor import recv_monitor_message
 from .message import Message
-from .. import KeyPair
-from ..loop import Loop
+from messidge import KeyPair, Waitable
+from messidge.loop import Loop
 
 
-class Connection:
-    """Connection onto a messidge broker."""
-    # Runs a background loop
-    # skt is the main tcp socket from here to the broker and belongs to the background thread
+class Connection(Waitable):
+    """Connection onto Messidge broker."""
+
+    # Is expecting ~/.messidge/ to contain keys named after the location to connect to (eg)
+    # -rw-r--r--  1 dpreece  staff   45B Jul  8 16:36 localhost
+    # -r--------  1 dpreece  staff   45B Jul  8 16:36 localhost.pub
+
+    # skt is the main tcp socket from here to the location and belongs to the background thread
     # x_thread_socket is the "pickup" end of the per-thread sending sockets forwards to skt
     # Note that messages received are exclusively dealt with on the background thread
 
@@ -45,7 +49,6 @@ class Connection:
         :param keys: An override for the key pair in the 'prefix' directory.
         :param server_pk: An override for the server public key in the 'prefix' directory."""
         super().__init__()
-        # location_ip is an alternative (local) ip or name.local
         self.connect_ip = location_ip if location_ip is not None else location
         self.location = location if location is not None else self.connect_ip
         self.keys = keys if keys is not None else KeyPair(location, prefix=prefix)
@@ -53,11 +56,11 @@ class Connection:
         self.nonce = None
         self.session_key = None
         self.connect_callbacks = set()
+        self.reflect_value_errors = reflect_value_errors
         self.thread_skt = {}  # map from thread to the socket used to send messages on it's behalf
         self.rid = b''
         self.loop = None
-        self.exception = None
-        self.ready_lock = allocate_lock()
+        self.loop_block = allocate_lock()
         self.finished_block = allocate_lock()
         self.uuid_blockreply = {}
         self.uuid_blockresults = {}
@@ -66,10 +69,10 @@ class Connection:
 
         # fetch the server's public key
         if server_pk is None:
-            filename = os.path.expanduser('%s/%s.spub' % (prefix, location))
             try:
+                filename = os.path.expanduser(prefix + '/%s.spub' % location)
                 with open(filename, 'r') as f:
-                    server_pk = f.read()
+                    server_pk = f.read().strip('\n')
             except FileNotFoundError:
                 raise RuntimeError("There is no server public key in %s so cannot connect" % filename)
         self.server_public_binary = b64decode(server_pk)
@@ -84,29 +87,26 @@ class Connection:
         zmq.Context.instance().setsockopt(zmq.LINGER, 0)
 
         # Should be able to connect, then.
-        self.ready_lock.acquire()
+        self.loop_block.acquire()
         self.finished_block.acquire()
         start_new_thread(self._start, ())
 
-    def wait_until_ready(self, timeout=120):
-        """Blocks waiting for the connection to be ready to use.
-
-        :param timeout: in seconds."""
-        self.ready_lock.acquire(timeout=timeout)
-        self.ready_lock.release()
-        self._maybe_raise()
+    def start(self):
+        """Start message loop - separate from __init__ so we get a chance to register_exclusive/register_commands"""
+        self.loop_block.release()  # causes the block in _start to clear
         return self
 
-    def wait_until_finished(self):
-        """Blocks until the message loop exits."""
+    def wait_until_complete(self):
+        """Blocks until the message loop exits"""
         self.finished_block.acquire()
         self.finished_block.release()
-        self._maybe_raise()
-        return self
+
+        # re-raises (on the main thread) if the loop caught an exception
+        if self.exception is not None:
+            raise self.exception
 
     def disconnect(self):
-        """Stop the message loop and disconnect - without this object cannot be garbage collected."""
-        self._maybe_raise()
+        """Stop the message loop and disconnect - without this object cannot be garbage collected"""
         self.loop.stop()
         for skt in self.thread_skt.values():
             skt.disconnect(self.inproc_name)
@@ -116,7 +116,7 @@ class Connection:
         self.uuid_blockresults.clear()
 
     def _start(self):
-        # The message loop runs on a background thread
+        """The message loop runs on a background thread"""
         self.loop_thread = get_ident()
 
         # create the trunk socket - remember sockets must be created on the thread they are used on
@@ -138,15 +138,21 @@ class Connection:
         self.loop = Loop(self.skt)
         self.loop.register_exclusive(self.skt_monitor, self._socket_event, comment="Socket events")
         self.loop.register_exclusive(self.x_thread_receive, self._fast_forward, comment="Cross thread socket")
-        self.loop.run()  # blocks until loop.stop is called
+        if self.reflect_value_errors:
+            self.loop.on_value_error(self._background_thread_exception)
 
-        # Maybe the main thread is in send_blocking_cmd
+        # block until allowed to go by start()
+        self.loop_block.acquire()
+        self.loop.run()  # blocks until loop.stop is called
+        self.exception = self.loop.caught_exception
+
+        # Maybe the main thread was in wait_until_ready
+        if self.exception is not None:
+            self.unblock_and_raise(self.exception)
+
+        # Maybe the main thread was in send_blocking_cmd
         for block in self.uuid_blockreply.values():
             block.release()
-
-        # Maybe the main thread is in wait_until_ready
-        if self.loop.caught_exception is not None:
-            self.unblock_and_raise(self.loop.caught_exception)
 
         # Maybe the main thread is in wait_until_complete
         self.finished_block.release()
@@ -159,7 +165,6 @@ class Connection:
                 raise RuntimeError("Was disconnected from location with a blocking call still pending")
             logging.info("Have been disconnected from location. Wait...")
             self.connected = False
-            self.ready_lock.acquire()
             return
         if event['event'] != zmq.EVENT_CONNECTED:
             return
@@ -191,10 +196,10 @@ class Connection:
         logging.info("Handshake completed")
         for callback in self.connect_callbacks:
             callback(self.rid)
-        self.ready_lock.release()
+        self.mark_as_ready()
 
-    def send_skt(self) -> zmq.Socket:
-        """Allocates (if necessary) a socket for this thread to send messages to."""
+    def send_skt(self):
+        """Allocates (if necessary) a socket for this thread to send messages to"""
         thread = get_ident()
 
         # if this is the loop thread then we can use the main thread socket to send
@@ -212,7 +217,8 @@ class Connection:
             return new_skt
 
     def destroy_send_skt(self):
-        """Closes and removes the send_skt for this thread."""
+        """Closes and removes the send_skt for this thread"""
+        # TODO: send_skt should be an object so we can garbage collect
         thread = get_ident()
         try:
             self.thread_skt[thread].close()
@@ -221,8 +227,8 @@ class Connection:
         except KeyError:
             pass
 
-    def send_cmd(self, cmd: bytes, params=None, *, bulk: bytes=b'', uuid=b'', reply_callback=None):
-        """Send command to broker
+    def send_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', uuid=b'', reply_callback=None):
+        """Sends a command to the location, can route replies.
 
         :param cmd: the command.
         :param params: A {'key': 'value'} dictionary of parameters or ['list'].
@@ -230,8 +236,6 @@ class Connection:
         :param uuid: A uuid to attach to this command (so it can reply).
         :param reply_callback: Callback to fire when the command receives a reply - gets passed the message.
         """
-        self._maybe_raise()
-
         # BS check
         if self.loop is None:
             raise RuntimeError("The connection has no message loop - _start has not been called.")
@@ -247,8 +251,8 @@ class Connection:
 
         Message.send(self.send_skt(), cmd, self.nonce, self.session_key, params, uuid=uuid, bulk=bulk)
 
-    def send_blocking_cmd(self, cmd: bytes, params=None, *, bulk: bytes=b'', timeout: float=30) -> Message:
-        """Send command to broker, blocks waiting for reply.
+    def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=30) -> Message:
+        """Sends a command to the location, can route replies.
 
         :param cmd: the command.
         :param params: A {'key': 'value'} dictionary of parameters or ['list'].
@@ -256,20 +260,20 @@ class Connection:
         :param timeout: In seconds.
         :return: The reply message.
         """
-        on_loop_thread = self._maybe_raise()
-        if on_loop_thread:
+        thread = get_ident()
+        if thread == self.loop_thread:
             raise RuntimeError("Cannot send a blocking command on the loop thread")
 
         # acquire a lock, wait for the reply
         uuid = shortuuid.uuid().encode()
         self.uuid_blockreply[uuid] = allocate_lock()
         self.uuid_blockreply[uuid].acquire()
-        self.uuid_blockresults[uuid] = None
         self.send_cmd(cmd, params, uuid=uuid, reply_callback=self._unblock, bulk=bulk)
 
         # when the background thread has an answer, the lock will release and we can continue
         if not self.uuid_blockreply[uuid].acquire(timeout=timeout):
             raise ValueError("Blocking call timed out: %s(%s)" % (cmd.decode(), str(params)))
+
         msg = self.uuid_blockresults[uuid]
 
         # clean up
@@ -277,10 +281,14 @@ class Connection:
         del self.uuid_blockreply[uuid]
         del self.uuid_blockresults[uuid]
 
-        self._maybe_raise()
+        # raise exceptions if either in the message or caught on a background thread
+        if 'exception' in msg.params:
+            raise ValueError(msg.params['exception'])
+        if self.exception:
+            raise self.exception
         return msg
 
-    def register_commands(self, obj, commands: dict):
+    def register_commands(self, obj, commands):
         """Register a list of commands to be handled by the loop.
 
         :param obj: The object that will handle the commands.
@@ -322,14 +330,6 @@ class Connection:
         except KeyError:
             logging.error("Message from a blocking call arrived late (ignored): " + str(msg))
 
-    def unblock_and_raise(self, exception):
-        """Causes the thread in 'wait_until_ready' to raise an exception.
-
-        :param exception: the exception to be raised."""
-        self.exception = exception
-        if self.ready_lock.locked():
-            self.ready_lock.release()
-
     def _maybe_raise(self):
         # See if the message loop captured an exception
         # returns bool for whether or not you're on the loop thread
@@ -346,15 +346,21 @@ class Connection:
             raise excpt
         return False
 
+    def _background_thread_exception(self, e, msg):
+        """Call from non-main threads to return a value error to the client"""
+        if msg.replyable():
+            msg.reply(self.send_skt(), {"exception": str(e)})
+            logging.info("Exception passed back to client: " + str(e))
+        else:
+            logging.warning("Unable to return ValueError to client: " + str(e))
+
     def __repr__(self):
-        return "<messidge.connection.Connection object at %s (location=%s)>" % (id(self), self.location)
+        return "<messidge.client.connection.Connection object at %s (location=%s)>" % (id(self), self.location)
 
 
-def cmd(required_params: list, *, needs_reply: bool=False) -> (list, bool):
+def cmd(required_params, *, needs_reply=False):
     """Create the internal structure describing a command
 
     :param required_params: A list of parameters that must be included with the command.
     :param needs_reply: The message needs to be replied to (and must have a uuid)."""
-    if 'user' in required_params or 'session' in required_params:
-        raise RuntimeError('"user" and "session" are reserved parameter names')
     return required_params, needs_reply

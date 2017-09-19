@@ -15,6 +15,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 import os
 from sys import stderr
+from _thread import allocate_lock
 from http.client import HTTPConnection
 from base64 import b64decode, b64encode
 from libnacl.public import SecretKey
@@ -109,3 +110,36 @@ def create_account(location, token, prefix='~/.messidge'):
         f.write(location)
     with open(directory + location + '.spub', 'w') as f:
         f.write(reply)
+
+
+class Waitable:
+    def __init__(self, locked=True):
+        self.wait_lock = allocate_lock()
+        self.exception = None
+        if locked:
+            self.wait_lock.acquire()
+
+    def __del__(self):
+        if self.wait_lock.locked():
+            self.wait_lock.release()
+
+    def wait_until_ready(self, timeout=120):
+        """Blocks waiting for a (normally asynchronous) update indicating the object is ready.
+
+        Note this also causes exceptions that would previously have been raised on the background thread
+        to be raise on the calling (i.e. main) thread."""
+        # this lock is used for waiting on while uploading layers, needs to be long
+        self.wait_lock.acquire(timeout=timeout)
+        self.wait_lock.release()
+        if self.exception:
+            raise self.exception
+        return self
+
+    def mark_as_ready(self):
+        if self.wait_lock.locked():
+            self.wait_lock.release()
+
+    def unblock_and_raise(self, exception):
+        # releases the lock but causes the thread in 'wait_until_ready' to raise an exception
+        self.exception = exception
+        self.mark_as_ready()

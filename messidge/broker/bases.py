@@ -29,8 +29,8 @@ class ModelMinimal:
         self.nodes = {}
         self.sessions = {}
 
-    # overload if you want to make a resource offer to the client
-    def resources(self, pk):
+    # overload if you want to make a resource offer to the client (given pk)
+    def resources(self, broker, pk):
         return None
 
     # overload these if you want to make persistent sessions
@@ -42,7 +42,3 @@ class ModelMinimal:
 
     def delete_session_record(self, sess):
         pass
-
-
-class ControllerMinimal:
-    commands = {}
