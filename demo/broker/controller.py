@@ -1,10 +1,9 @@
 # A sample controller using the Messidge python library
 # (c) 2017 David Preece, this work is in the public domain
-from messidge.bases import ControllerMinimal
 from messidge.broker.broker import cmd
 
 
-class MyController(ControllerMinimal):
+class MyController:
     def __init__(self, model):
         self.model = model
 

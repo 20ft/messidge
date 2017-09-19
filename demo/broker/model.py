@@ -1,7 +1,8 @@
 # A sample model using the Messidge python library
 # (c) 2017 David Preece, this work is in the public domain
 import logging
-from messidge.bases import ModelMinimal, NodeMinimal, SessionMinimal
+
+from messidge.broker.bases import ModelMinimal, NodeMinimal, SessionMinimal
 
 
 class MyModel(ModelMinimal):
@@ -22,6 +23,9 @@ class MyModel(ModelMinimal):
 
     def total_notes(self):
         return sum((len(values) for key, values in self.pk_notes.items()))
+
+    def resources(self, broker, pk):
+        return {'nodes': list(broker.node_pk_rid.keys())}  # materialise the generator (keys)
 
 
 class MySession(SessionMinimal):

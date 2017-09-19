@@ -1,14 +1,29 @@
-# A quick test/demo of messidge
+# A quick runthrough of writing a client for Messidge
 # (c) 2017 David Preece, this work is in the public domain
 import logging
 import time
-from messidge.client.connection import Connection
+from messidge.client.connection import Connection, cmd
 from messidge import default_location
 
-# logging.basicConfig(level=logging.DEBUG)
+
+class Controller:
+    def __init__(self):
+        self.nodes = []
+
+    def _resource_offer(self, msg):
+        self.nodes = msg.params['nodes']
+
+    commands = {b'resource_offer': cmd(['nodes'])}
+
+
+logging.basicConfig(level=logging.INFO)
 
 # takes it's server address, pk and sk from the configuration in (default) ~/.messidge
-conn = Connection(default_location()).wait_until_ready()  # I do not like blocking the c'tor
+conn = Connection(default_location())  # I do not like blocking the c'tor
+controller = Controller()
+conn.register_commands(controller, Controller.commands)
+conn.start().wait_until_ready()
+
 
 # an asynchronous command
 conn.send_cmd(b'write_note', {'note': time.ctime(time.time())})
@@ -30,16 +45,14 @@ try:
 except ValueError as e:
     print("ValueError raised because: " + str(e))
 
-# an exception (missing params) is produced by an async call
-# nothing will happen until we try to use the connection for something else
-# the trick here is to log at level=DEBUG or use a blocking call in the first place
-print("Deliberately sending error and waiting")
-conn.send_cmd(b'write_note')  # missing the 'note' parameter
-time.sleep(0.5)
-print("Using the connection again (even correctly) causes the exception to be thrown...")
-try:
-    conn.send_cmd(b'write_note', {'note': 'I will not be sent'})
-except ValueError as e:
-    print("ValueError because: " + str(e))
+# get the nodes to do something for us by passing their public key
+for node_pk in controller.nodes:
+    reply = conn.send_blocking_cmd(b'divide', {'node': node_pk, 'dividend': 10.0, 'devisor': 5.0})
+    print("10.0/5.0=" + str(reply.params['quotient']))
+
+    try:
+        conn.send_blocking_cmd(b'divide', {'node': node_pk, 'dividend': 10.0, 'devisor': 0.0})
+    except ValueError as e:
+        print("ValueError raised because: " + str(e))
 
 conn.disconnect()

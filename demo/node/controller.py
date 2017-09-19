@@ -1,10 +1,12 @@
 # A sample node controller using the Messidge python library
 # (c) 2017 David Preece, this work is in the public domain
-from messidge.bases import ControllerMinimal
 from messidge.client.connection import cmd
 
 
-class Controller(ControllerMinimal):
+class Controller:
+    def __init__(self, socket_factory):
+        self.socket_factory = socket_factory
+
     def _divide(self, msg):
         # some additional validation
         if not isinstance(msg.params['dividend'], float) or not isinstance(msg.params['devisor'], float):
@@ -13,6 +15,6 @@ class Controller(ControllerMinimal):
             raise ValueError("Devisor cannot be zero")
 
         # go
-        msg.reply({'quotient': msg.params['divident'] / msg.params['devisor']})
+        msg.reply(self.socket_factory(), results={'quotient': msg.params['dividend'] / msg.params['devisor']})
 
-    commands = {'divide': cmd(['dividend', 'devisor'], needs_reply=True)}
+    commands = {b'divide': cmd(['dividend', 'devisor'], needs_reply=True)}
