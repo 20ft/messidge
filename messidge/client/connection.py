@@ -39,12 +39,13 @@ class Connection(Waitable):
     # x_thread_socket is the "pickup" end of the per-thread sending sockets forwards to skt
     # Note that messages received are exclusively dealt with on the background thread
 
-    def __init__(self, location: str=None, prefix='~/.messidge', *, location_ip: str=None,
-                 keys: KeyPair=None, server_pk: str=None):
+    def __init__(self, location: str=None, *, prefix='~/.messidge', reflect_value_errors=False,
+                 location_ip: str=None, keys: KeyPair=None, server_pk: str=None):
         """Instantiate a connection.
 
         :param location: The FQDN of the location to connect to.
         :param prefix: Directory for the client keys and server public keys.
+        :param reflect_value_errors: If True, raised ValueErrors will have their source messages replied to.
         :param location_ip: An override for the DNS resolution of 'location'. Useful for LAN and/or test connections.
         :param keys: An override for the key pair in the 'prefix' directory.
         :param server_pk: An override for the server public key in the 'prefix' directory."""
