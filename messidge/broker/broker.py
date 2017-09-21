@@ -27,15 +27,17 @@ from .message import BrokerMessage
 
 
 class Broker:
-    def __init__(self, keys: KeyPair, model, node_type, session_type, controller, *, base_port: int=2020,
-                 pre_run_callback=None, session_recovered_callback=None, session_destroy_callback=None):
-        """Initialise the broker.
+    """The broker is the top level object for creating a server/broker."""
 
-        :param keys: Server public/secret keys.
+    def __init__(self, keys: KeyPair, model, node_type, session_type, controller, *, base_port: int=2020,
+                 identity_type=Identity, auth_type=Authenticate, account_confirm_type=AccountConfirmationServer,
+                 pre_run_callback=None, session_recovered_callback=None, session_destroy_callback=None):
+        """:param keys: Server public/secret keys.
         :param model: Model object (derived from ModelMinimal).
         :param node_type: Class to construct node objects with (derived from NodeMinimal).
         :param session_type: Class to construct session objects with (derived from SessionMinimal).
         :param controller: Controller object (derived from ControllerMinimal).
+        :param identity_type: Potentially custom class to construct an identity server (see identity.py).
         :param base_port: TCP port to use plus the next one (so default is 2020 and 2021).
         :param pre_run_callback: Fired last thing before the message loop starts.
         :param session_recovered_callback: Fired with the new rid when a session reconnects.
@@ -60,9 +62,9 @@ class Broker:
         self.node_pk_rid = {}
         self.local_replies = {}  # map from uuid to function call
         self.forward_replies = LRU(1024)  # map from msg.uuid to rid so we can forward replies
-        self.identity = Identity()
-        self.authenticator = Authenticate(self.identity, self.keys)
-        self.account_confirm = AccountConfirmationServer(self.identity, self.keys, base_port + 1)
+        self.identity = identity_type()
+        self.authenticator = auth_type(self.identity, self.keys)
+        self.account_confirm = account_confirm_type(self.identity, self.keys, base_port + 1)
         self.loop = None
         self.next_connection_rid = None
 
