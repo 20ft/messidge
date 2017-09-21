@@ -19,7 +19,7 @@ class Controller:
 logging.basicConfig(level=logging.INFO)
 
 # takes it's server address, pk and sk from the configuration in (default) ~/.messidge
-conn = Connection(default_location())  # I do not like blocking the c'tor
+conn = Connection(default_location())
 controller = Controller()
 conn.register_commands(controller, Controller.commands)
 conn.start().wait_until_ready()

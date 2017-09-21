@@ -16,7 +16,7 @@ class Node:
     # The node is effectively just another client
     def __init__(self, location, server_pk, keys):
         # set up some objects
-        self.connection = Connection(location=location, server_pk=server_pk, keys=keys, reflect_value_errors=True)
+        self.connection = Connection(location, server_pk=server_pk, keys=keys, reflect_value_errors=True)
         self.controller = Controller(self.connection.send_skt)
         self.connection.register_commands(self.controller, Controller.commands)
         self.connection.start()

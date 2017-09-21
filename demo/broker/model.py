@@ -21,11 +21,8 @@ class MyModel(ModelMinimal):
         except KeyError:  # no notes for this pk
             return []
 
-    def total_notes(self):
-        return sum((len(values) for key, values in self.pk_notes.items()))
-
-    def resources(self, broker, pk):
-        return {'nodes': list(broker.node_pk_rid.keys())}  # materialise the generator (keys)
+    def resources(self, pk):
+        return {'nodes': list(self.nodes.keys())}  # materialise the generator (keys)
 
 
 class MySession(SessionMinimal):

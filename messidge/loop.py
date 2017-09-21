@@ -47,6 +47,102 @@ class Loop:
             self.p.register(skt, zmq.POLLIN)  # so register_reply will work even if we don't register anything else
             logging.debug("Message loop has registered trunk socket")
 
+    def run(self):
+        """Message loop. Runs single threaded (usually but not necessarily a background thread)."""
+        self.running_thread = get_ident()
+        tmr = time.time()
+        msg = None
+        socket = None
+        logging.debug("Message loop started")
+        while self.running_thread is not None:
+            try:
+                # warning if the loop stalls
+                latency = ((time.time() - tmr) * 1000)
+                if latency > 10:
+                    if latency < 1000:
+                        logging.debug("Event loop stalled for (ms): " + str(latency))
+                    else:
+                        logging.warning("Event loop stalled for (ms): " + str(latency))
+
+                # fetch the events
+                events = self.p.poll(timeout=500)
+                tmr = time.time()
+                msg = None
+
+                # idle?
+                if len(events) == 0:
+                    for idle_task in set(self.idle):
+                        idle_task()
+                    continue
+
+                # Deal with all the events
+                for event in events:
+
+                    # did one of the previous events in the same group request the loop stop?
+                    # in which case we stop any retries
+                    if self.running_thread is None:
+                        self.idle.clear()
+                        break
+
+                    # on an exclusive socket? (the actual process of collecting the message is owned by the callback)
+                    socket = event[0]
+                    if socket in self.exclusive_handlers:
+                        self.exclusive_handlers[socket](socket)
+                        continue
+
+                    # maybe an fd socket hasn't disappeared yet?
+                    if isinstance(socket, int):
+                        logging.debug("Message arrived for an fd socket that was unregistered: " + str(socket))
+                        continue
+
+                    # an ordinary message
+                    msg = self.message_type.receive(socket, self.nonce, self.session_key)
+
+                    try:
+                        # non-main thread exceptions just bin out and don't take the app down
+                        # so the message loop catches them and waits for the main thread to deal with it.
+                        if 'exception' in msg.params:
+                            logging.debug("Message loop caught an exception: " + msg.params["exception"])
+                            self.caught_exception = ValueError(msg.params["exception"])
+
+                        # is this a hooked reply? - these may well deal with (or raise) exceptions...
+                        if msg.uuid in self.reply_callbacks:
+                            self.reply_callbacks[msg.uuid](msg)
+                            continue
+
+                        # hopefully, then, a vanilla command
+                        try:
+                            obj, handlers = self.command_handlers[socket]  # don't replace with single value
+                        except KeyError:
+                            logging.debug("Socket had left command handlers with a message still to process")
+                            continue
+                        try:
+                            handler = handlers[msg.command]
+                        except KeyError:
+                            logging.warning("No handler was found for: %s (uuid=%s)" % (msg.command, msg.uuid))
+                            continue
+
+                        logging.debug("Handling command: " + str(msg.command))
+                        Loop.check_basic_properties(msg, handler)
+                        getattr(obj, '_' + msg.command.decode())(msg)
+
+                    except ValueError as e:
+                        if self.value_error_handler:
+                            self.value_error_handler(e, msg)
+                        else:
+                            raise e
+
+            except KeyboardInterrupt:
+                self.stop()
+
+        logging.debug("Message loop has finished")
+
+    def stop(self):
+        """Causes the thread in 'run' to exit cleanly."""
+        if self.running_thread is None:
+            return
+        self.running_thread = None
+
     def set_crypto_params(self, nonce: bytes, session_key: bytes):
         """Sets the cryptographic parameters for this connection.
 
@@ -142,12 +238,6 @@ class Loop:
         :param callback: the callback to be fired, gets passed the exception and message that caused the exception."""
         self.value_error_handler = callback
 
-    def stop(self):
-        """Causes the thread in 'run' to exit cleanly (eventually)."""
-        if self.running_thread is None:
-            return
-        self.running_thread = None
-
     @staticmethod
     def check_basic_properties(msg, handler):
         """Helper utility to ensure messages fulfill certain basic criteria before they are passed to their handlers.
@@ -160,96 +250,6 @@ class Loop:
                 raise ValueError("Necessary parameter was not passed: " + necessary)
         if needs_reply and not msg.replyable():
             raise ValueError("This command needs to be replyable but the message was not: " + str(msg))
-
-    def run(self):
-        """Message loop. Runs single threaded (usually but not necessarily a background thread)."""
-        self.running_thread = get_ident()
-        tmr = time.time()
-        msg = None
-        socket = None
-        logging.debug("Message loop started")
-        while self.running_thread is not None:
-            try:
-                # warning if the loop stalls
-                latency = ((time.time()-tmr)*1000)
-                if latency > 10:
-                    if latency < 1000:
-                        logging.debug("Event loop stalled for (ms): " + str(latency))
-                    else:
-                        logging.warning("Event loop stalled for (ms): " + str(latency))
-
-                # fetch the events
-                events = self.p.poll(timeout=500)
-                tmr = time.time()
-                msg = None
-
-                # idle?
-                if len(events) == 0:
-                    for idle_task in set(self.idle):
-                        idle_task()
-                    continue
-
-                # Deal with all the events
-                for event in events:
-
-                    # did one of the previous events in the same group request the loop stop?
-                    # in which case we stop any retries
-                    if self.running_thread is None:
-                        self.idle.clear()
-                        break
-
-                    # on an exclusive socket? (the actual process of collecting the message is owned by the callback)
-                    socket = event[0]
-                    if socket in self.exclusive_handlers:
-                        self.exclusive_handlers[socket](socket)
-                        continue
-
-                    # maybe an fd socket hasn't disappeared yet?
-                    if isinstance(socket, int):
-                        logging.debug("Message arrived for an fd socket that was unregistered: " + str(socket))
-                        continue
-
-                    # an ordinary message
-                    msg = self.message_type.receive(socket, self.nonce, self.session_key)
-
-                    try:
-                        # non-main thread exceptions just bin out and don't take the app down
-                        # so the message loop catches them and waits for the main thread to deal with it.
-                        if 'exception' in msg.params:
-                            logging.debug("Message loop caught an exception: " + msg.params["exception"])
-                            self.caught_exception = ValueError(msg.params["exception"])
-
-                        # is this a hooked reply? - these may well deal with (or raise) exceptions...
-                        if msg.uuid in self.reply_callbacks:
-                            self.reply_callbacks[msg.uuid](msg)
-                            continue
-
-                        # hopefully, then, a vanilla command
-                        try:
-                            obj, handlers = self.command_handlers[socket]  # don't replace with single value
-                        except KeyError:
-                            logging.debug("Socket had left command handlers with a message still to process")
-                            continue
-                        try:
-                            handler = handlers[msg.command]
-                        except KeyError:
-                            logging.warning("No handler was found for: %s (uuid=%s)" % (msg.command, msg.uuid))
-                            continue
-
-                        logging.debug("Handling command: " + str(msg.command))
-                        Loop.check_basic_properties(msg, handler)
-                        getattr(obj, '_' + msg.command.decode())(msg)
-
-                    except ValueError as e:
-                        if self.value_error_handler:
-                            self.value_error_handler(e, msg)
-                        else:
-                            raise e
-
-            except KeyboardInterrupt:
-                self.stop()
-
-        logging.debug("Message loop has finished")
 
     def __repr__(self):
         return "<messidge.loop.Loop object at %x (exclusive=%d commands=%d replies_callbacks=%d)>" % \
