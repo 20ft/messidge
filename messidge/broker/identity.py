@@ -19,7 +19,12 @@ CREATE TABLE pending (token TEXT NOT NULL UNIQUE, email TEXT NOT NULL);
 
 
 class Identity:
+    """A default provider of identity and configuration"""
+
     def __init__(self, directory="~"):
+        """Construct the identity database if it's not there.
+
+        :param directory: The directory in which to place the database (identity.sqlite3)"""
         self.db = SqlCache(os.path.expanduser(directory), 'identity', ident_init)
 
     def stop(self):

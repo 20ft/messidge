@@ -25,12 +25,16 @@ class SessionMinimal:
 
 
 class ModelMinimal:
+    """Stores the nodes and user sessions attached to this broker."""
+
     def __init__(self):
         self.nodes = {}
         self.sessions = {}
 
-    # overload if you want to make a resource offer to the client (given pk)
-    def resources(self, broker, pk):
+    def resources(self, pk):
+        """Overload this method to return a resource offer to a newly connected client.
+
+        :param pk: the public key of the connecting user. """
         return None
 
     # overload these if you want to make persistent sessions

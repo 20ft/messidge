@@ -3,6 +3,14 @@ import sphinx_rtd_theme
 extensions = ['sphinx.ext.autodoc']
 autodoc_member_order = 'bysource'
 
+def skip(app, what, name, obj, skip, options):
+    if name == "__init__":
+        return False
+    return skip
+
+def setup(app):
+    app.connect("autodoc-skip-member", skip)
+
 templates_path = ['_templates']
 source_suffix = '.rst'
 master_doc = 'index'
@@ -11,7 +19,7 @@ master_doc = 'index'
 project = 'Messidge'
 copyright = '2017, David Preece'
 author = 'David Preece'
-version = ''
+version = '1.0.1'
 release = ''
 
 language = None
@@ -25,4 +33,4 @@ html_theme_options = {
     'collapse_navigation': False,
     'display_version': False
 }
-html_static_path = ['_static']
+

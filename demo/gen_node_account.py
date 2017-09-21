@@ -6,8 +6,8 @@ from messidge.broker.identity import Identity
 identity = Identity()
 try:
     keys = KeyPair.new()
-    skeys = KeyPair("localhost_broker")
     identity.register_node(keys.public.decode(), '{}')
+    skeys = KeyPair("localhost_broker")
     print("Start node with...\npython3 node.py localhost %s %s %s" %
           (keys.public.decode(), keys.secret.decode(), skeys.public.decode()))
 finally:

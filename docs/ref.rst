@@ -5,6 +5,8 @@ Reference
 Broker
 ======
 
+Classes in this section are the API for building server/broker applications...
+
 Broker
 ^^^^^^
 
@@ -13,22 +15,34 @@ Broker
 
 ..  autofunction:: messidge.broker.broker.cmd
 
+Model
+^^^^^
+
+..  autoclass:: messidge.broker.bases.ModelMinimal
+    :members:
+
 Identity
 ^^^^^^^^
 
 ..  autoclass:: messidge.broker.identity.Identity
     :members:
 
+----
+
 Loop
 ====
 
-The same message loop is used by both the broker and the client (although the broker specialises command handling).
+The same message loop is used by both the broker and the client.
 
 ..  autoclass:: messidge.loop.Loop
     :members:
 
+----
+
 Client
 ======
+
+Classes in this section are the API for building client applications...
 
 Connection
 ^^^^^^^^^^
@@ -37,9 +51,3 @@ Connection
     :members:
 
 ..  autofunction:: messidge.client.connection.cmd
-
-Message
-^^^^^^^
-
-..  autoclass:: messidge.client.message.Message
-    :members:

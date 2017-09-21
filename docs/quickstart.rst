@@ -16,7 +16,7 @@ Run the Broker
 
 You should see something like... ::
 
-    dpreece@davermbp ~/m/demo> python3 broker.py
+    ~/m/demo> python3 broker.py
     INFO:root:Started account confirmation server: 0.0.0.0:2021
     INFO:root:Started broker: 0.0.0.0:2020
 
@@ -29,10 +29,10 @@ Add a Node
 
 You should see something like... ::
 
-    dpreece@davermbp ~/m/demo> python3 gen_node_account.py
+    ~/m/demo> python3 gen_node_account.py
     Start node with...
     python3 node.py localhost zmtfztCypF/1zaEyhIXV6WsSITXq574ysMyI+aNYylA= AXj5unW+OK8+j/IwNrA7lWYhnUUB9y0r8tMeiNyg1Yw= WeAmNmDOiBuMAK3ecVwRu0yyvVIhGNXdUii7GCYCORw=
-    dpreece@davermbp ~/m/demo> python3 node.py localhost zmtfztCypF/1zaEyhIXV6WsSITXq574ysMyI+aNYylA= AXj5unW+OK8+j/IwNrA7lWYhnUUB9y0r8tMeiNyg1Yw= WeAmNmDOiBuMAK3ecVwRu0yyvVIhGNXdUii7GCYCORw=
+    ~/m/demo> python3 node.py localhost zmtfztCypF/1zaEyhIXV6WsSITXq574ysMyI+aNYylA= AXj5unW+OK8+j/IwNrA7lWYhnUUB9y0r8tMeiNyg1Yw= WeAmNmDOiBuMAK3ecVwRu0yyvVIhGNXdUii7GCYCORw=
     INFO:root:Connecting to: localhost:2020
     INFO:root:Message queue connected
     INFO:root:Handshake completed
@@ -47,18 +47,18 @@ Run a Client
 
 You should see... ::
 
-    dpreece@davermbp ~/m/demo> export PYTHONPATH=".."
-    dpreece@davermbp ~/m/demo> python3 gen_user_account.py davep@zedkep.com
+    ~/m/demo> export PYTHONPATH=".."
+    ~/m/demo> python3 gen_user_account.py davep@zedkep.com
     The user will need this token: 2UUDwtG9EevqQiVkdaEzHn
-    dpreece@davermbp ~/m/demo> python3 confirm_user_account.py 2UUDwtG9EevqQiVkdaEzHn
-    dpreece@davermbp ~/m/demo> python3 client.py
+    ~/m/demo> python3 confirm_user_account.py 2UUDwtG9EevqQiVkdaEzHn
+    ~/m/demo> python3 client.py
     INFO:root:Connecting to: localhost:2020
     INFO:root:Message queue connected
     INFO:root:Handshake completed
     Here are the notes: ['Tue Sep 19 21:54:02 2017']
     This will print before the async callback is triggered...
     Async callback: ['Tue Sep 19 21:54:02 2017']
-    ValueError raised because: raise_exception was called
+    Expected! ValueError raised because: raise_exception was called
     10.0/5.0=2.0
-    ValueError raised because: Devisor cannot be zero
+    Expected! ValueError raised because: Devisor cannot be zero
 

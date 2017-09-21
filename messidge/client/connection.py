@@ -200,7 +200,7 @@ class Connection(Waitable):
         self.mark_as_ready()
 
     def send_skt(self):
-        """Allocates (if necessary) a socket for this thread to send messages to"""
+        """Allocates (if necessary) a socket for the calling thread to send messages with."""
         thread = get_ident()
 
         # if this is the loop thread then we can use the main thread socket to send
@@ -218,7 +218,7 @@ class Connection(Waitable):
             return new_skt
 
     def destroy_send_skt(self):
-        """Closes and removes the send_skt for this thread"""
+        """Closes and removes the send_skt for the calling thread."""
         # TODO: send_skt should be an object so we can garbage collect
         thread = get_ident()
         try:
@@ -253,7 +253,8 @@ class Connection(Waitable):
         Message.send(self.send_skt(), cmd, self.nonce, self.session_key, params, uuid=uuid, bulk=bulk)
 
     def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=30) -> Message:
-        """Sends a command to the location, can route replies.
+        """Sends a command to the location and blocks waiting for a reply (which is returned).
+        May raise ValueError exceptions.
 
         :param cmd: the command.
         :param params: A {'key': 'value'} dictionary of parameters or ['list'].
