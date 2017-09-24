@@ -388,11 +388,11 @@ class Broker:
                 return
 
             # no we're either dealing with a command or forwarding it to the node so let's add some context
-            if msg.rid in self.rid_agent:
-                msg.params['user'] = self.rid_agent[msg.rid].pk
-                msg.params['session'] = msg.rid
             if msg.rid in self.node_rid_pk:
                 msg.params['node'] = self.node_rid_pk[msg.rid]
+            elif msg.rid in self.rid_agent:
+                msg.params['user'] = self.rid_agent[msg.rid].pk
+                msg.params['session'] = msg.rid
 
             # if this is a message that laksa can deal with, call the controller
             if msg.command in self.commands:
