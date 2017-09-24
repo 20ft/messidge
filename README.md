@@ -1,4 +1,5 @@
 # Messidge
+(full documentation is [on the web](http://messidge.20ft.nz/))
 
 **Messidge is a message passing framework for distributed systems needing a public gateway.**
 
