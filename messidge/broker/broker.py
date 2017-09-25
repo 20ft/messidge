@@ -368,6 +368,10 @@ class Broker:
         # at this point we know the message is plaintext and will have either emit_pipe or emit_socket set
         # ensure we have all the necessary parameters then forward, call the handler, validate, whatever
         try:
+            # we can only have params be a dict at this point
+            if not isinstance(msg.params, dict):
+                raise ValueError("Message parameters must be a dictionary.")
+
             # is this a reply we're supposed to be forwarding?
             if msg.uuid in self.forward_replies:
                 msg.rid = self.forward_replies[msg.uuid]

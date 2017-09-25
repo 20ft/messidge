@@ -163,8 +163,6 @@ class BrokerMessage:
             param_string = "-encrypted-"
             if isinstance(params, dict):
                 param_string = str(list(params.keys()))
-            if isinstance(params, list):
-                param_string = str(params)
             print("STDOUT   %s: (rid=%s:uuid=%s:cmd=%s %s)" %
                   (words, str(rid), uuid.decode(), str(command), param_string))
 
