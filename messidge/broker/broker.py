@@ -308,7 +308,7 @@ class Broker:
         logging.info("Session disconnected: " + str(rid))
 
         if self.session_destroy_callback is not None:
-            self.session_destroy_callback(sess)
+            self.session_destroy_callback(rid)
         del self.model.sessions[rid]
 
     # Entrypoint for events that have come in over zmq
