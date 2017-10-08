@@ -13,7 +13,6 @@
 
 import logging
 import time
-import traceback
 from _thread import get_ident
 
 import zmq
@@ -102,7 +101,7 @@ class Loop:
                         # so the message loop catches them and waits for the main thread to deal with it.
                         if 'exception' in msg.params:
                             logging.debug("Message loop caught an exception: " + msg.params["exception"])
-                            self.caught_exception = ValueError(msg.params["exception"])
+                            raise ValueError(msg.params["exception"])
 
                         # is this a hooked reply? - these may well deal with (or raise) exceptions...
                         if msg.uuid in self.reply_callbacks:
@@ -131,7 +130,9 @@ class Loop:
                         else:
                             raise e
 
-            except KeyboardInterrupt:
+            except BaseException as e:
+                logging.debug("Loop caught exception: " + str(e))
+                self.caught_exception = e
                 self.stop()
 
         logging.debug("Message loop has finished")

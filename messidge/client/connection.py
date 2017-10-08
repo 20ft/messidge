@@ -17,7 +17,8 @@ import libnacl
 import libnacl.utils
 import cbor
 import psutil
-from _thread import start_new_thread, allocate_lock, get_ident
+from threading import Thread
+from _thread import allocate_lock, get_ident
 from base64 import b64decode
 import shortuuid
 import zmq
@@ -61,7 +62,6 @@ class Connection(Waitable):
         self.rid = b''
         self.loop = None
         self.loop_block = allocate_lock()
-        self.finished_block = allocate_lock()
         self.uuid_blockreply = {}
         self.uuid_blockresults = {}
         self.connected = False
@@ -87,9 +87,9 @@ class Connection(Waitable):
         zmq.Context.instance().setsockopt(zmq.LINGER, 0)
 
         # Should be able to connect, then.
-        self.loop_block.acquire()
-        self.finished_block.acquire()
-        start_new_thread(self._start, ())
+        self.loop_block.acquire()  # allows the thread to start and prepare but not actually run, yet.
+        self.thread = Thread(target=self._start, name="Messidge background loop")
+        self.thread.start()
 
     def start(self):
         """Start message loop - separate from __init__ so we get a chance to register_exclusive/register_commands"""
@@ -98,8 +98,7 @@ class Connection(Waitable):
 
     def wait_until_complete(self):
         """Blocks until the message loop exits"""
-        self.finished_block.acquire()
-        self.finished_block.release()
+        self.thread.join()
 
         # re-raises (on the main thread) if the loop caught an exception
         if self.exception is not None:
@@ -143,7 +142,7 @@ class Connection(Waitable):
 
         # block until allowed to go by start()
         self.loop_block.acquire()
-        self.loop.run()  # blocks until loop.stop is called
+        self.loop.run()  # blocks until loop.stop is called or the loop catches a wayward exception
         self.exception = self.loop.caught_exception
 
         # Maybe the main thread was in wait_until_ready
@@ -153,9 +152,6 @@ class Connection(Waitable):
         # Maybe the main thread was in send_blocking_cmd
         for block in self.uuid_blockreply.values():
             block.release()
-
-        # Maybe the main thread is in wait_until_complete
-        self.finished_block.release()
 
     def _socket_event(self, monitor_socket):
         # is this a connection event?
@@ -218,7 +214,6 @@ class Connection(Waitable):
 
     def destroy_send_skt(self):
         """Closes and removes the send_skt for the calling thread."""
-        # TODO: send_skt should be an object so we can garbage collect
         thread = get_ident()
         try:
             self.thread_skt[thread].close()
@@ -330,22 +325,6 @@ class Connection(Waitable):
             self.loop.unregister_reply(msg.uuid)
         except KeyError:
             logging.error("Message from a blocking call arrived late (ignored): " + str(msg))
-
-    def _maybe_raise(self):
-        # See if the message loop captured an exception
-        # returns bool for whether or not you're on the loop thread
-        thread = get_ident()
-        if thread == self.loop_thread:
-            return True
-        # anything to raise?
-        if self.loop.caught_exception:
-            self.exception = self.loop.caught_exception
-            self.loop.caught_exception = None
-        if self.exception:
-            excpt = self.exception
-            self.exception = None
-            raise excpt
-        return False
 
     def _background_thread_exception(self, e, msg):
         """Call from non-main threads to return a value error to the client"""
