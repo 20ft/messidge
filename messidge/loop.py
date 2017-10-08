@@ -13,6 +13,7 @@
 
 import logging
 import time
+import traceback
 from _thread import get_ident
 
 import zmq
@@ -131,9 +132,8 @@ class Loop:
                             raise e
 
             except BaseException as e:
-                logging.debug("Loop caught exception: " + str(e))
+                logging.warning(traceback.format_exc())
                 self.caught_exception = e
-                self.stop()
 
         logging.debug("Message loop has finished")
 
