@@ -131,6 +131,9 @@ class Loop:
                         else:
                             raise e
 
+            except KeyboardInterrupt:
+                self.stop()
+
             except BaseException as e:
                 logging.warning(traceback.format_exc())
                 self.caught_exception = e
