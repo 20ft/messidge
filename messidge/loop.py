@@ -50,10 +50,8 @@ class Loop:
         """Message loop. Runs single threaded (usually but not necessarily a background thread)."""
         self.running_thread = get_ident()
         tmr = time.time()
-        msg = None
-        socket = None
         logging.debug("Message loop started")
-        while self.running_thread is not None:
+        while True:
             try:
                 # warning if the loop stalls
                 latency = ((time.time() - tmr) * 1000)
@@ -70,18 +68,16 @@ class Loop:
 
                 # idle?
                 if len(events) == 0:
+                    # should be be quitting?
+                    if self.running_thread is None:  # yes, leave loop
+                        break
+                    # otherwise do our idle tasks
                     for idle_task in set(self.idle):
                         idle_task()
                     continue
 
                 # Deal with all the events
                 for event in events:
-
-                    # did one of the previous events in the same group request the loop stop?
-                    # in which case we stop any retries
-                    if self.running_thread is None:
-                        self.idle.clear()
-                        break
 
                     # on an exclusive socket? (the actual process of collecting the message is owned by the callback)
                     socket = event[0]
