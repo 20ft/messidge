@@ -22,10 +22,9 @@ class NodeMinimal:
 
 
 class SessionMinimal:
-    def __init__(self, rid, pk, nonce):
+    def __init__(self, rid, pk):
         self.rid = rid
         self.pk = pk
-        self.nonce = nonce
         self.old_rid = rid  # for use with reconnection
 
     # overload to free resources - can use passed broker to send commands to nodes

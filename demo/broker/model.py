@@ -26,8 +26,8 @@ class MyModel(ModelMinimal):
 
 
 class MySession(SessionMinimal):
-    def __init__(self, rid, pk, nonce):
-        super().__init__(rid, pk, nonce)
+    def __init__(self, rid, pk):
+        super().__init__(rid, pk)
         logging.debug("I am the right kind of session object.")
 
 

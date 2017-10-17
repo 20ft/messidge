@@ -16,37 +16,35 @@
 
 import cbor
 import libnacl
+import libnacl.utils
 import logging
 
 
 class Message:
-    def __init__(self):
+    def __init__(self, session_key=None):
         self.command = None
         self.uuid = None
         self.params = None
         self.bulk = None
-        self.nonce = None
-        self.session_key = None
+        self.session_key = session_key  # here so we can reply to a message without knowledge of the session itself
 
     @staticmethod
-    def receive(socket, nonce, session_key):
+    def receive(socket, session_key):
         """Pulls one message off the socket, decrypts and returns it.
 
         :param socket: The ZMQ socket to receive from.
-        :param nonce: The n-once for this connection.
         :param session_key: The session key for this connection.
         :return: The received and decrypted message."""
         # parts are command, uuid, params, bulk
-        rtn = Message()
+        rtn = Message(session_key)
         parts = socket.recv_multipart(copy=False)
-        rtn.command = bytes(parts[0].buffer)
-        rtn.uuid = bytes(parts[1].buffer)
-        rtn.params, rtn.bulk = Message.decrypted_params(bytes(parts[2].buffer),
-                                                        bytes(parts[3].buffer),
+        nonce = bytes(parts[0].buffer)
+        rtn.command = bytes(parts[1].buffer)
+        rtn.uuid = bytes(parts[2].buffer)
+        rtn.params, rtn.bulk = Message.decrypted_params(bytes(parts[3].buffer),
+                                                        bytes(parts[4].buffer),
                                                         nonce,
                                                         session_key)
-        rtn.nonce = nonce
-        rtn.session_key = session_key
         logging.debug("Message.receive (%s:%s:%s)" %
                       (rtn.uuid.decode(),
                        rtn.command.decode(),
@@ -55,24 +53,22 @@ class Message:
 
     @staticmethod
     def from_persist(parts):
-        """Creates a message from six previously persisted parts.
+        """Creates a message from four previously persisted parts.
 
-        :param parts: The six parts.
+        :param parts: The four parts.
         :return: The constructed message."""
         rtn = Message()
         rtn.command = parts[0]
         rtn.uuid = parts[1]
         rtn.params = parts[2]
         rtn.bulk = parts[3]
-        rtn.nonce = parts[4]
-        rtn.session_key = parts[5]
         return rtn
 
     def for_persist(self) -> []:
-        """Create a list of 6 parts that can be used to recreate this message.
+        """Create a list of four parts that can be used to recreate this message.
 
-        :return: A six element list that can be used to persist the message."""
-        return [self.command, self.uuid, self.params, self.bulk, self.nonce, self.session_key]
+        :return: A four element list that can be used to persist the message."""
+        return [self.command, self.uuid, self.params, self.bulk]
 
     def replyable(self) -> bool:
         """Can this message be replied to?
@@ -96,21 +92,20 @@ class Message:
                        list(results.keys()) if isinstance(results, dict) else "--"))
         if results is None:
             results = {}
-        Message.send(socket, b'', self.nonce, self.session_key, results, uuid=self.uuid, bulk=bulk, trace=False)
+        Message.send(socket, b'', self.session_key, results, uuid=self.uuid, bulk=bulk, trace=False)
 
     def forward(self, socket):
         """Forward a message unchanged through another socket.
 
         :param socket: the socket to use to forward the message."""
-        Message.send(socket, self.command, self.nonce, self.session_key, self.params, uuid=self.uuid, bulk=self.bulk)
+        Message.send(socket, self.command, self.session_key, self.params, uuid=self.uuid, bulk=self.bulk)
 
     @staticmethod
-    def send(socket, command, nonce, session_key, params=None, *, uuid=b'', bulk=b'', trace=True):
+    def send(socket, command, session_key, params=None, *, uuid=b'', bulk=b'', trace=True):
         """Send a command to the location. Can be called directly but much better to use Connection.send_cmd.
 
         :param socket: socket to use to send the message.
         :param command: the command as a binary string.
-        :param nonce: The n-once for this connection.
         :param session_key: The session key for this connection.
         :param params: An optional {'key': 'value'} dictionary of parameters or ['list'].
         :param uuid: An optional uuid to attach to the message. This is what makes messages replyable.
@@ -124,8 +119,11 @@ class Message:
                            list(params.keys()) if isinstance(params, dict) else "--"))
         if params is None:
             params = {}
+
+        nonce = libnacl.utils.rand_nonce()
         params_encrypted, bulk_encrypted = Message.encrypted_params(params, bulk, nonce, session_key)
-        parts = [command,
+        parts = [nonce,
+                 command,
                  uuid,
                  params_encrypted,
                  bulk_encrypted]
@@ -137,11 +135,11 @@ class Message:
 
         :param params: The parameter dictionary.
         :param bulk: The bulk data.
-        :param nonce: The n-once for this connection.
+        :param nonce: The n-once for this message.
         :param session_key: The session key for this connection.
         :return: A (bytes, bytes) tuple for the encrypted params and bulk data.
         """
-        if session_key is not b'':
+        if session_key is not None:
             params_encrypted = libnacl.crypto_secretbox(cbor.dumps(params), nonce, session_key)
             bulk_encrypted = libnacl.crypto_secretbox(bulk, nonce, session_key) if bulk != b'' else b''
             return params_encrypted, bulk_encrypted
@@ -154,11 +152,11 @@ class Message:
 
         :param params: The parameter dictionary.
         :param bulk: The bulk data.
-        :param nonce: The n-once for this connection.
+        :param nonce: The n-once for this message.
         :param session_key: The session key for this connection.
         :return: A (bytes, bytes) tuple for the decrypted params and bulk data.
         """
-        if session_key is not b'':
+        if session_key is not None:
             params_plaintext = libnacl.crypto_secretbox_open(params, nonce, session_key)
             bulk_plaintext = libnacl.crypto_secretbox_open(bulk, nonce, session_key) if bulk != b'' else b''
             return cbor.loads(params_plaintext), bulk_plaintext

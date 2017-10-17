@@ -54,7 +54,6 @@ class Connection(Waitable):
         self.location = location if location is not None else self.connect_ip
         self.keys = keys if keys is not None else KeyPair(location, prefix=prefix)
         self.inproc_name = "inproc://x_thread/" + str(id(self))
-        self.nonce = None
         self.session_key = None
         self.connect_callbacks = set()
         self.reflect_value_errors = reflect_value_errors
@@ -83,7 +82,7 @@ class Connection(Waitable):
         zmq.Context.instance().set(zmq.IO_THREADS, psutil.cpu_count())
         logging.debug("ZeroMQ context IO threads: " + str(zmq.Context.instance().get(zmq.IO_THREADS)))
 
-        # (Trying to) prevent queued messages being sent instead of a handshake when reconnecting
+        # Prevent queued messages being sent instead of a handshake when reconnecting
         zmq.Context.instance().setsockopt(zmq.LINGER, 0)
 
         # Should be able to connect, then.
@@ -170,24 +169,22 @@ class Connection(Waitable):
 
         # send the encryption session request
         # the rid is used to show which session we *were* if reconnecting
-        self.nonce = libnacl.utils.rand_nonce()
-        params = {'user': self.keys.public_binary(), 'nonce': self.nonce, 'rid': self.rid}
-        self.skt.send_multipart([b'auth', b'', cbor.dumps(params), b''])
+        send_nonce = libnacl.utils.rand_nonce()
+        params = {'user': self.keys.public_binary(), 'rid': self.rid}
+        self.skt.send_multipart([send_nonce, b'auth', b'', cbor.dumps(params), b''])
         try:
             parts = self.skt.recv_multipart()
-            if len(parts) != 2:
+            if len(parts) != 3:
                 raise ValueError("Authentication failed.")
-            enc_session_key, rid = parts
+            recv_nonce, enc_session_key, rid = parts
         except ValueError as e:
             self.unblock_and_raise(e)  # raises within a blocked wait_until_ready
             return
 
         # unwrap and set the session key
-        self.session_key = enc_session_key
-        if enc_session_key is not b'':
-            self.session_key = libnacl.crypto_box_open(enc_session_key, self.nonce,
-                                                       self.server_public_binary, self.keys.secret_binary())
-        self.loop.set_crypto_params(self.nonce, self.session_key)
+        self.session_key = libnacl.crypto_box_open(enc_session_key, recv_nonce,
+                                                   self.server_public_binary, self.keys.secret_binary())
+        self.loop.set_crypto_params(self.session_key)
         self.rid = rid
         logging.info("Handshake completed")
         for callback in self.connect_callbacks:
@@ -244,7 +241,7 @@ class Connection(Waitable):
                 uuid = shortuuid.uuid().encode()  # as bytes
             self.loop.register_reply(uuid, reply_callback)
 
-        Message.send(self.send_skt(), cmd, self.nonce, self.session_key, params, uuid=uuid, bulk=bulk)
+        Message.send(self.send_skt(), cmd, self.session_key, params, uuid=uuid, bulk=bulk)
 
     def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=30) -> Message:
         """Sends a command to the location and blocks waiting for a reply (which is returned).
@@ -330,7 +327,7 @@ class Connection(Waitable):
         """Call from non-main threads to return a value error to the client"""
         if msg.replyable():
             msg.reply(self.send_skt(), {"exception": str(e)})
-            logging.info("Exception passed back to client: " + str(e))
+            logging.info("Client called %s and raised a ValueError: %s" % (str(msg.command), str(e)))
         else:
             logging.warning("Unable to return ValueError to client: " + str(e))
 

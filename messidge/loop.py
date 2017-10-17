@@ -34,7 +34,6 @@ class Loop:
         self.command_handlers = {}
         self.idle = set()
         self.skt = skt  # the main trunk socket
-        self.nonce = None
         self.session_key = None
         self.message_type = message_type
         self.value_error_handler = None
@@ -91,19 +90,19 @@ class Loop:
                         continue
 
                     # an ordinary message
-                    msg = self.message_type.receive(socket, self.nonce, self.session_key)
+                    msg = self.message_type.receive(socket, self.session_key)
 
                     try:
+                        # is this a hooked reply? - these may well deal with (or raise) exceptions...
+                        if msg.uuid in self.reply_callbacks:
+                            self.reply_callbacks[msg.uuid](msg)
+                            continue
+
                         # non-main thread exceptions just bin out and don't take the app down
                         # so the message loop catches them and waits for the main thread to deal with it.
                         if 'exception' in msg.params:
                             logging.debug("Message loop caught an exception: " + msg.params["exception"])
                             raise ValueError(msg.params["exception"])
-
-                        # is this a hooked reply? - these may well deal with (or raise) exceptions...
-                        if msg.uuid in self.reply_callbacks:
-                            self.reply_callbacks[msg.uuid](msg)
-                            continue
 
                         # hopefully, then, a vanilla command
                         try:
@@ -142,13 +141,11 @@ class Loop:
             return
         self.running_thread = None
 
-    def set_crypto_params(self, nonce: bytes, session_key: bytes):
+    def set_crypto_params(self, session_key: bytes):
         """Sets the cryptographic parameters for this connection.
 
-        :param nonce: The n-once for this connection.
         :param session_key: The session key for this connection.
         """
-        self.nonce = nonce
         self.session_key = session_key
 
     def register_exclusive(self, obj, handler, *, comment: str=""):

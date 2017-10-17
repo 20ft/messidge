@@ -18,6 +18,7 @@
 
 import logging
 import random
+import libnacl.utils
 from base64 import b64encode
 from lru import LRU
 import os
@@ -210,7 +211,7 @@ class Broker:
                 self.session_recovered_callback(session, msg.params['rid'])
         else:
             # if an alias is connecting then it will need the original pk to be used because encryption
-            session = self.session_type(msg.rid, pk, msg.params['nonce'])
+            session = self.session_type(msg.rid, pk)
             self.model.sessions[msg.rid] = session
             resources = self.model.resources(pk)
 
@@ -220,7 +221,7 @@ class Broker:
 
         # create the encryption agent
         # we register the filenumber because zmq.poll won't poll a pipe object (but it will for a descriptor)
-        agent = Agent(msg.rid, pk, msg.params['nonce'])
+        agent = Agent(msg.rid, pk)
         self.loop.register_exclusive(agent.encrypt_pipe[0].fileno(),
                                      self._emit_encrypted, comment="Encryption pipe, agent=" + str(msg.rid))
         self.loop.register_exclusive(agent.decrypt_pipe[0].fileno(),
@@ -232,12 +233,14 @@ class Broker:
         self.rid_agent[msg.rid] = agent
 
         # send the session key to the other end
-        parts = [msg.rid, agent.encrypted_session_key(self.keys.secret_binary()), msg.rid]
+        nonce = libnacl.utils.rand_nonce()
+        parts = [msg.rid, nonce, agent.encrypted_session_key(nonce, self.keys.secret_binary()), msg.rid]
         skt.send_multipart(parts)
 
         # maybe create a resource offer
         if resources is not None:
-            BrokerMessage.send_pipe(agent.encrypt_pipe[0], msg.rid, b'resource_offer', b'', resources)
+            nonce = libnacl.utils.rand_nonce()
+            BrokerMessage.send_pipe(agent.encrypt_pipe[0], msg.rid, nonce, b'resource_offer', b'', resources)
 
         return agent
 
@@ -422,8 +425,8 @@ class Broker:
                 raise ValueError("No node address or invalid: " + str(msg.command))
 
         except ValueError as e:
-            logging.warning("Client %s called %s and threw a ValueError: %s" %
-                            (str(msg.rid), str(msg.command), str(e)))
+            logging.info("Client %s called %s and raised a ValueError: %s" %
+                         (str(msg.rid), str(msg.command), str(e)))
             try:
                 msg.reply({"exception": str(e)})
             except BaseException as e:

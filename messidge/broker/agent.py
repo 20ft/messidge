@@ -23,12 +23,11 @@ from .message import BrokerMessage
 class Agent(Process):
     """Multiprocess async encryption"""
 
-    def __init__(self, rid, pk, nonce):
+    def __init__(self, rid, pk):
         super().__init__(target=self.run, name=b64encode(pk).decode())
         # basics
         self.rid = rid
         self.pk = pk
-        self.nonce = nonce
         self.session_key = libnacl.utils.salsa_key()
 
         # create the sockets to send work up here
@@ -40,8 +39,8 @@ class Agent(Process):
         self.running = False
         self.start()
 
-    def encrypted_session_key(self, secret_binary):
-        return libnacl.crypto_box(self.session_key, self.nonce, self.pk, secret_binary)
+    def encrypted_session_key(self, nonce, secret_binary):
+        return libnacl.crypto_box(self.session_key, nonce, self.pk, secret_binary)
 
     def stop(self):
         self.stop_pipe[0].send(b'')
@@ -58,13 +57,13 @@ class Agent(Process):
             for skt in ready_list:
                 if skt == self.decrypt_pipe[1]:
                     msg = BrokerMessage.receive_pipe(self.decrypt_pipe[1], True)
-                    msg.decrypt(self.nonce, self.session_key)
+                    msg.decrypt(self.session_key)
                     msg.forward_pipe(self.decrypt_pipe[1])
                     continue
 
                 if skt == self.encrypt_pipe[1]:
                     msg = BrokerMessage.receive_pipe(self.encrypt_pipe[1], False)
-                    msg.encrypt(self.nonce, self.session_key)
+                    msg.encrypt(self.session_key)
                     msg.forward_pipe(self.encrypt_pipe[1])
                     continue
 
