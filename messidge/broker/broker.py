@@ -128,7 +128,7 @@ class Broker:
             logging.warning("Failed sending command, no agent for rid: " + str(rid))
             return
         if agent is None:
-            BrokerMessage.send_socket(self.skt, rid, command, uuid, params, bulk)
+            BrokerMessage.send_socket(self.skt, rid, b'', command, uuid, params, bulk)
         else:
             BrokerMessage.send_pipe(agent.encrypt_pipe[0], rid, command, uuid, params, bulk)
 
@@ -263,7 +263,7 @@ class Broker:
             logging.info("Connected node pk: " + b64encode(pk).decode())
 
         # send a blank session key so the connection knows it's not encrypted
-        parts = [msg.rid, b'', msg.rid]
+        parts = [msg.rid, b'', b'', msg.rid]
         skt.send_multipart(parts)
         return None
 

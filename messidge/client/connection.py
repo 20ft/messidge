@@ -182,9 +182,10 @@ class Connection(Waitable):
             return
 
         # unwrap and set the session key
-        self.session_key = libnacl.crypto_box_open(enc_session_key, recv_nonce,
-                                                   self.server_public_binary, self.keys.secret_binary())
-        self.loop.set_crypto_params(self.session_key)
+        if enc_session_key != b'':
+            self.session_key = libnacl.crypto_box_open(enc_session_key, recv_nonce,
+                                                       self.server_public_binary, self.keys.secret_binary())
+            self.loop.set_crypto_params(self.session_key)
         self.rid = rid
         logging.info("Handshake completed")
         for callback in self.connect_callbacks:
