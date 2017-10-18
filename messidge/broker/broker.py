@@ -438,7 +438,10 @@ class Broker:
 
         # is it expecting a reply and can we send it?
         try:
-            necessary_params, needs_reply, node_only = self.commands[msg.command]
+            try:
+                necessary_params, needs_reply, node_only = self.commands[msg.command]
+            except ValueError as e:
+                raise RuntimeError("Problem unpacking the command structure - you have all three values?: " + str(e))
             if needs_reply and not msg.replyable():
                 raise ValueError("Message needs to be replyable for: " + str(msg.command))
             if node_only and msg.rid not in self.node_rid_pk:
