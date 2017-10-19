@@ -40,7 +40,8 @@ class Broker:
 
     def __init__(self, keys: KeyPair, model, node_type, session_type, controller, *, base_port: int=2020,
                  identity_type=Identity, auth_type=Authenticate, account_confirm_type=AccountConfirmationServer,
-                 pre_run_callback=None, session_recovered_callback=None, session_destroy_callback=None):
+                 pre_run_callback=None, session_recovered_callback=None,
+                 session_destroy_callback=None, node_destroy_callback=None):
         """:param keys: Server public/secret keys.
         :param model: Model object (derived from ModelMinimal).
         :param node_type: Class to construct node objects with (derived from NodeMinimal).
@@ -50,7 +51,8 @@ class Broker:
         :param base_port: TCP port to use plus the next one (so default is 2020 and 2021).
         :param pre_run_callback: Fired last thing before the message loop starts.
         :param session_recovered_callback: Fired with the new rid when a session reconnects.
-        :param session_destroy_callback: Fired last thing before a session is destroyed."""
+        :param session_destroy_callback: Fired last thing before a session is destroyed.
+        :param node_destroy_callback: Fired last thing before a node is destroyed (was disconnected, say)."""
         # Basic structure
         self.keys = keys
         self.model = model
@@ -60,6 +62,7 @@ class Broker:
         self.session_type = session_type
         self.session_recovered_callback = session_recovered_callback
         self.session_destroy_callback = session_destroy_callback
+        self.node_destroy_callback = node_destroy_callback
         self.pre_run_callback = pre_run_callback
         self.base_port = base_port
         self.skt = None  # initialised when run
@@ -298,6 +301,8 @@ class Broker:
         del self.node_rid_pk[rid]
         del self.node_pk_rid[pk]
         del self.model.nodes[pk]
+        if self.node_destroy_callback is not None:
+            self.node_destroy_callback(rid)
         logging.info("Node disconnected: " + b64encode(pk).decode())
 
     def _disconnect_user(self, rid):
@@ -308,11 +313,11 @@ class Broker:
             logging.debug("Closing session not held in the model, ignoring: " + str(rid))
             return
         sess.close(self)
-        logging.info("Session disconnected: " + str(rid))
 
+        del self.model.sessions[rid]
         if self.session_destroy_callback is not None:
             self.session_destroy_callback(rid)
-        del self.model.sessions[rid]
+        logging.info("Session disconnected: " + str(rid))
 
     # Entrypoint for events that have come in over zmq
     def _event_socket(self, skt):
@@ -397,7 +402,7 @@ class Broker:
             # no we're either dealing with a command or forwarding it to the node so let's add some context
             if msg.rid in self.node_rid_pk:
                 msg.params['node'] = self.node_rid_pk[msg.rid]
-            elif msg.rid in self.rid_agent:
+            elif msg.rid in self.rid_agent and self.rid_agent[msg.rid] is not None:
                 msg.params['user'] = self.rid_agent[msg.rid].pk
                 msg.params['session'] = msg.rid
 
