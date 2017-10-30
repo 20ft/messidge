@@ -61,7 +61,7 @@ class Loop:
                         logging.warning("Event loop stalled for (ms): " + str(latency))
 
                 # fetch the events
-                events = self.p.poll(timeout=500)
+                events = self.p.poll(timeout=5000)
                 tmr = time.time()
                 msg = None
 
