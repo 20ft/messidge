@@ -81,18 +81,17 @@ class BrokerMessage:
     def reply(self, results=None, bulk=None):
         # Called on an existing message, presumably a command to provide the results
         # You can store a message and call reply more than once
-        nonce = libnacl.utils.rand_nonce()
         if results is None:
             results = {}
         if bulk is not None:
             self.bulk = bulk
 
         if self.emit_pipe is not None:
-            BrokerMessage.send_pipe(self.emit_pipe, self.rid, nonce, b'', self.uuid, results, bulk=self.bulk)
+            BrokerMessage.send_pipe(self.emit_pipe, self.rid, b'', b'', self.uuid, results, bulk=self.bulk)
             return
 
         if self.emit_socket is not None:
-            BrokerMessage.send_socket(self.emit_socket, self.rid, nonce, b'', self.uuid, results, bulk=self.bulk)
+            BrokerMessage.send_socket(self.emit_socket, self.rid, b'', b'', self.uuid, results, bulk=self.bulk)
             return
 
         raise RuntimeError("Attempted to reply to a message without setting either emit pipe or socket")

@@ -133,7 +133,8 @@ class Broker:
         if agent is None:
             BrokerMessage.send_socket(self.skt, rid, b'', command, uuid, params, bulk)
         else:
-            BrokerMessage.send_pipe(agent.encrypt_pipe[0], rid, command, uuid, params, bulk)
+
+            BrokerMessage.send_pipe(agent.encrypt_pipe[0], rid, b'', command, uuid, params, bulk)
 
     def set_next_rid(self):
         """Set the routing id for the next socket that connects."""
@@ -204,12 +205,13 @@ class Broker:
         if msg.params['rid'] in self.model.sessions:  # pre-existing session
             # Update rids so the session now has the new rid
             session = self.model.sessions[msg.params['rid']]
-            logging.info("Recovering session: " + str(msg.params['rid']))
+            logging.info("Recovering session: %s -> %s" % (str(msg.params['rid']), str(msg.rid)))
             del self.model.sessions[msg.params['rid']]
+            self.model.delete_session_record(msg.params['rid'])
             session.rid = msg.rid  # so now the session "belongs" to the new rid
             for fd, old_rid in self.fd_rid.items():
                 if old_rid == msg.params['rid']:
-                    self.fd_rid = msg.rid
+                    self.fd_rid[fd] = msg.rid
             if self.session_recovered_callback is not None:
                 self.session_recovered_callback(session, msg.params['rid'])
         else:
@@ -242,8 +244,7 @@ class Broker:
 
         # maybe create a resource offer
         if resources is not None:
-            nonce = libnacl.utils.rand_nonce()
-            BrokerMessage.send_pipe(agent.encrypt_pipe[0], msg.rid, nonce, b'resource_offer', b'', resources)
+            BrokerMessage.send_pipe(agent.encrypt_pipe[0], msg.rid, b'', b'resource_offer', b'', resources)
 
         return agent
 

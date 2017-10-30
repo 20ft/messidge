@@ -169,9 +169,8 @@ class Connection(Waitable):
 
         # send the encryption session request
         # the rid is used to show which session we *were* if reconnecting
-        send_nonce = libnacl.utils.rand_nonce()
         params = {'user': self.keys.public_binary(), 'rid': self.rid}
-        self.skt.send_multipart([send_nonce, b'auth', b'', cbor.dumps(params), b''])
+        self.skt.send_multipart([b'', b'auth', b'', cbor.dumps(params), b''])
         try:
             parts = self.skt.recv_multipart()
             if len(parts) != 3:
@@ -182,10 +181,13 @@ class Connection(Waitable):
             return
 
         # unwrap and set the session key
-        if enc_session_key != b'':
-            self.session_key = libnacl.crypto_box_open(enc_session_key, recv_nonce,
-                                                       self.server_public_binary, self.keys.secret_binary())
-            self.loop.set_crypto_params(self.session_key)
+        try:
+            if enc_session_key != b'':
+                self.session_key = libnacl.crypto_box_open(enc_session_key, recv_nonce,
+                                                           self.server_public_binary, self.keys.secret_binary())
+                self.loop.set_crypto_params(self.session_key)
+        except libnacl.CryptError:
+            raise ValueError("Handshake failed.")
         self.rid = rid
         logging.info("Handshake completed")
         for callback in self.connect_callbacks:
@@ -244,7 +246,7 @@ class Connection(Waitable):
 
         Message.send(self.send_skt(), cmd, self.session_key, params, uuid=uuid, bulk=bulk)
 
-    def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=30) -> Message:
+    def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=120) -> Message:
         """Sends a command to the location and blocks waiting for a reply (which is returned).
         May raise ValueError exceptions.
 

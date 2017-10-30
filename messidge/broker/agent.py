@@ -47,7 +47,7 @@ class Agent(Process):
 
     def run(self):
         self.running = True
-        while True:
+        while self.running:
             try:
                 ready_list = wait([self.encrypt_pipe[1], self.decrypt_pipe[1], self.stop_pipe[1]])
             except (KeyboardInterrupt, OSError):

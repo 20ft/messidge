@@ -119,7 +119,6 @@ class Message:
                            list(params.keys()) if isinstance(params, dict) else "--"))
         if params is None:
             params = {}
-
         nonce = libnacl.utils.rand_nonce()
         params_encrypted, bulk_encrypted = Message.encrypted_params(params, bulk, nonce, session_key)
         parts = [nonce,
