@@ -36,15 +36,19 @@ class Message:
         :param session_key: The session key for this connection.
         :return: The received and decrypted message."""
         # parts are command, uuid, params, bulk
-        rtn = Message(session_key)
-        parts = socket.recv_multipart(copy=False)
-        nonce = bytes(parts[0].buffer)
-        rtn.command = bytes(parts[1].buffer)
-        rtn.uuid = bytes(parts[2].buffer)
-        rtn.params, rtn.bulk = Message.decrypted_params(bytes(parts[3].buffer),
-                                                        bytes(parts[4].buffer),
-                                                        nonce,
-                                                        session_key)
+        try:
+            rtn = Message(session_key)
+            parts = socket.recv_multipart(copy=False)
+            nonce = bytes(parts[0].buffer)
+            rtn.command = bytes(parts[1].buffer)
+            rtn.uuid = bytes(parts[2].buffer)
+            rtn.params, rtn.bulk = Message.decrypted_params(bytes(parts[3].buffer),
+                                                            bytes(parts[4].buffer),
+                                                            nonce,
+                                                            session_key)
+        except IndexError:
+            raise RuntimeError("A broken message was received from the socket")
+        
         logging.debug("Message.receive (%s:%s:%s)" %
                       (rtn.uuid.decode(),
                        rtn.command.decode(),

@@ -183,7 +183,6 @@ class Broker:
             return False, None
 
         # authenticate
-        # msg = self.persistent.resolve_alias(msg)  # TODO
         success, user, config = self.authenticator.auth(msg)
         if not success:
             logging.warning("There was a protocol-correct failure to authenticate: " +

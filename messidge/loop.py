@@ -23,11 +23,12 @@ from .client.message import Message
 
 class Loop:
 
-    def __init__(self, skt=None, message_type=Message):
+    def __init__(self, skt=None, message_type=Message, *, exit_on_exception=False):
         """Initialise (but not start) a message loop.
 
         :param skt: the (actually optional) ZMQ socket that connects to the location.
-        :param message_type: optionally set to use a non-default message class."""
+        :param message_type: optionally set to use a non-default message class.
+        :param exit_on_exception: the message loop will exit if an exception makes it to the BaseException handler."""
         super().__init__()
         self.exclusive_handlers = {}
         self.reply_callbacks = {}
@@ -36,6 +37,7 @@ class Loop:
         self.skt = skt  # the main trunk socket
         self.session_key = None
         self.message_type = message_type
+        self.exit_on_exception = exit_on_exception
         self.value_error_handler = None
         self.running_thread = None
         self.caught_exception = None
@@ -132,6 +134,8 @@ class Loop:
             except BaseException as e:
                 logging.warning(traceback.format_exc())
                 self.caught_exception = e
+                if self.exit_on_exception:
+                    self.stop()
 
         logging.debug("Message loop has finished")
 

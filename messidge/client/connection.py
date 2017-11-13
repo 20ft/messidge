@@ -39,12 +39,14 @@ class Connection(Waitable):
     # x_thread_socket is the "pickup" end of the per-thread sending sockets forwards to skt
     # Note that messages received are exclusively dealt with on the background thread
 
-    def __init__(self, location: str=None, *, prefix='~/.messidge', reflect_value_errors=False,
+    def __init__(self, location: str=None, *, prefix='~/.messidge',
+                 exit_on_exception=False, reflect_value_errors=False,
                  location_ip: str=None, keys: KeyPair=None, server_pk: str=None):
         """Instantiate a connection.
 
         :param location: The FQDN of the location to connect to.
         :param prefix: Directory for the client keys and server public keys.
+        :param exit_on_exception: Causes the message loop to exit if there's an uncaught exception.
         :param reflect_value_errors: If True, raised ValueErrors will have their source messages replied to.
         :param location_ip: An override for the DNS resolution of 'location'. Useful for LAN and/or test connections.
         :param keys: An override for the key pair in the 'prefix' directory.
@@ -57,6 +59,7 @@ class Connection(Waitable):
         self.session_key = None
         self.connect_callbacks = set()
         self.reflect_value_errors = reflect_value_errors
+        self.exit_on_exception = exit_on_exception
         self.thread_skt = {}  # map from thread to the socket used to send messages on it's behalf
         self.rid = b''
         self.loop = None
@@ -133,7 +136,7 @@ class Connection(Waitable):
         logging.debug("Cross-thread socket is: %x" % id(self.x_thread_receive))
 
         # kick off a message loop - has to be constructed on background thread
-        self.loop = Loop(self.skt)
+        self.loop = Loop(self.skt, exit_on_exception=self.exit_on_exception)
         self.loop.register_exclusive(self.skt_monitor, self._socket_event, comment="Socket events")
         self.loop.register_exclusive(self.x_thread_receive, self._fast_forward, comment="Cross thread socket")
         if self.reflect_value_errors:
