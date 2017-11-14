@@ -52,7 +52,7 @@ class Loop:
         self.running_thread = get_ident()
         tmr = time.time()
         logging.debug("Message loop started")
-        while True:
+        while self.running_thread is not None:
             try:
                 # warning if the loop stalls
                 latency = ((time.time() - tmr) * 1000)

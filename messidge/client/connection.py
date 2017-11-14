@@ -101,16 +101,16 @@ class Connection(Waitable):
     def wait_until_complete(self):
         """Blocks until the message loop exits"""
         self.thread.join()
-
+        
         # re-raises (on the main thread) if the loop caught an exception
         if self.exception is not None:
             raise self.exception
 
     def disconnect(self):
         """Stop the message loop and disconnect - without this object cannot be garbage collected"""
-        self.loop.stop()
         for skt in self.thread_skt.values():
             skt.disconnect(self.inproc_name)
+        self.loop.stop()
         self.thread_skt.clear()
         self.connect_callbacks.clear()
         self.uuid_blockreply.clear()
