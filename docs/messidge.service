@@ -1,0 +1,14 @@
+[Unit]
+Description=Messidge docs site
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tf -w messidge.20ft.nz tfnz/messidge_docs
+KillSignal=SIGINT
+TimeoutStopSec=5
+Restart=always
+User=admin
+Group=admin
+
+[Install]
+WantedBy=multi-user.target
