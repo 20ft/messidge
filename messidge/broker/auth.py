@@ -24,9 +24,6 @@ class Authenticate:
         self.identity = identity
         self.keys = keys
 
-    def __del__(self):
-        logging.debug("Authenticator closed")
-
     def auth(self, msg):
         # Authenticate against config
         # Returns success, user, config
