@@ -92,6 +92,7 @@ class Broker:
         try:
             self.skt.bind("tcp://*:" + str(self.base_port))
         except zmq.error.ZMQError:
+            logging.error("Cannot bind socket - is there an instance of the broker running already?")
             raise RuntimeError("Cannot bind zmq listen socket, exiting")
         self.set_next_rid()
 
@@ -111,7 +112,8 @@ class Broker:
     def stop(self):
         """Stop background threads. Must be called to allow garbage collection and for a clean exit."""
         self.identity.stop()  # confirmation server just bins out when we exit (a daemon thread)
-        self.loop.stop()
+        if self.loop is not None:  # if can't bind socket, bins out before loop is constructed
+            self.loop.stop()
 
     def send_cmd(self, rid, command: bytes, params: dict, *, bulk: bytes=b'', uuid: bytes= b'', local_reply=None):
         """Send command to either a node or user
