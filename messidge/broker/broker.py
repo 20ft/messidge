@@ -97,7 +97,7 @@ class Broker:
         self.set_next_rid()
 
         # Set up the message loop
-        self.loop = Loop(self.skt, message_type=BrokerMessage)
+        self.loop = Loop(self.skt, message_type=BrokerMessage, exit_on_exception=True)
         self.loop.register_exclusive(self.skt, self._event_socket, comment="Events")
         self.loop.register_exclusive(self.skt.get_monitor_socket(), self._monitor, comment="Socket monitor for events")
 
