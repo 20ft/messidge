@@ -203,6 +203,7 @@ class Broker:
         # tag words: recover, rewrite, map
         pk = msg.params['user']
         resources = None
+        session = None
         if msg.params['rid'] in self.model.sessions:  # pre-existing session
             # Update rids so the session now has the new rid
             session = self.model.sessions[msg.params['rid']]
@@ -213,16 +214,17 @@ class Broker:
             for fd, old_rid in self.fd_rid.items():
                 if old_rid == msg.params['rid']:
                     self.fd_rid[fd] = msg.rid
+            self.model.sessions[msg.rid] = session
+            self.model.create_session_record(session)  # don't factor out, the callback needs to be called AFTER
             if self.session_recovered_callback is not None:
                 self.session_recovered_callback(session, msg.params['rid'])
         else:
             # if an alias is connecting then it will need the original pk to be used because encryption
             session = self.session_type(msg.rid, pk)
             self.model.sessions[msg.rid] = session
-            resources = self.model.resources(pk)
+            self.model.create_session_record(session)
 
-        self.model.sessions[msg.rid] = session
-        self.model.create_session_record(session)
+        resources = self.model.resources(pk)
         logging.info("Connected session: " + str(msg.rid))
 
         # create the encryption agent
