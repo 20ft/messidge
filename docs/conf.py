@@ -19,7 +19,7 @@ master_doc = 'index'
 project = 'Messidge'
 copyright = '2017, David Preece'
 author = 'David Preece'
-version = '1.0.1'
+version = '1.0.11'
 release = ''
 
 language = None
