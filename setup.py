@@ -16,7 +16,7 @@ from setuptools import setup
 
 setup(
     name='messidge',
-    version='1.0.11',
+    version='1.0.12',
     author='David Preece',
     author_email='davep@polymath.tech',
     url='https://polymath.tech',
