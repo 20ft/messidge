@@ -16,10 +16,10 @@ from setuptools import setup
 
 setup(
     name='messidge',
-    version='1.0.12',
+    version='1.0.13',
     author='David Preece',
-    author_email='davep@polymath.tech',
-    url='https://polymath.tech',
+    author_email='davep@20ft.nz',
+    url='https://20ft.nz',
     license='BSD',
     packages=['messidge', 'messidge.broker', 'messidge.client'],
     install_requires=['pyzmq', 'libnacl', 'shortuuid', 'psutil', 'lru-dict', 'cbor', 'bottle', 'litecache'],
