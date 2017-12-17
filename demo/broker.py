@@ -6,7 +6,7 @@ from messidge.broker.broker import Broker
 from demo.broker.model import MyModel, MySession, MyNode
 from demo.broker.controller import MyController
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 # fetch/create the server keys

@@ -178,11 +178,6 @@ class Broker:
         if msg.command != b'auth':
             logging.debug("Not a handshake message, dropped: " + str(msg.command))
             return False, None
-        try:
-            msg.params = cbor.loads(msg.params)
-        except BaseException:
-            logging.debug("Handshake message failed to unpack params: " + str(msg.command))
-            return False, None
 
         # authenticate
         success, user, config = self.authenticator.auth(msg)
@@ -242,8 +237,9 @@ class Broker:
 
         # send the session key to the other end
         nonce = libnacl.utils.rand_nonce()
-        parts = [msg.rid, nonce, agent.encrypted_session_key(nonce, self.keys.secret_binary()), msg.rid]
-        skt.send_multipart(parts)
+        parts = [nonce, agent.encrypted_session_key(nonce, self.keys.secret_binary()), msg.rid]
+        binary = cbor.dumps(parts)
+        skt.send_multipart((msg.rid, binary))
 
         # maybe create a resource offer
         if resources is not None:
@@ -270,8 +266,9 @@ class Broker:
             logging.info("Connected node pk: " + b64encode(pk).decode())
 
         # send a blank session key so the connection knows it's not encrypted
-        parts = [msg.rid, b'', b'', msg.rid]
-        skt.send_multipart(parts)
+        parts = [b'', b'', msg.rid]
+        binary = cbor.dumps(parts)
+        skt.send_multipart((msg.rid, binary))
         return None
 
     def _monitor(self, skt):
@@ -336,7 +333,6 @@ class Broker:
         try:
             agent = self.rid_agent[msg.rid]  # may be None, but still a valid (node) connection
             if agent is None:  # a node
-                msg.params = cbor.loads(msg.params)
                 msg.emit_socket = skt
             else:  # a user
                 # send to be decrypted
@@ -468,11 +464,12 @@ class Broker:
         # called when pipe 'fd' has an encrypted message ready to send
         try:
             pipe = self.fd_pipe[fd]
-            parts = pipe.recv()
+            rid, parts = pipe.recv()
         except EOFError:
             logging.error("EOF while receiving in _emit_encrypted: " + str(fd))
             return
-        self.skt.send_multipart(parts)
+        binary = cbor.dumps(parts)
+        self.skt.send_multipart((rid, binary))
 
     def __repr__(self):
         return "<messidge.broker.Broker object at %x>" % id(self)

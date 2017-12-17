@@ -173,12 +173,15 @@ class Connection(Waitable):
         # send the encryption session request
         # the rid is used to show which session we *were* if reconnecting
         params = {'user': self.keys.public_binary(), 'rid': self.rid}
-        self.skt.send_multipart([b'', b'auth', b'', cbor.dumps(params), b''])
+        parts = [b'', b'auth', b'', params, b'']
+        binary = cbor.dumps(parts)
+        self.skt.send(binary)
         try:
-            parts = self.skt.recv_multipart()
-            if len(parts) != 3:
+            in_binary = self.skt.recv()
+            in_parts = cbor.loads(in_binary)
+            if len(in_parts) != 3:
                 raise ValueError("Authentication failed.")
-            recv_nonce, enc_session_key, rid = parts
+            recv_nonce, enc_session_key, rid = in_parts
         except ValueError as e:
             self.unblock_and_raise(e)  # raises within a blocked wait_until_ready
             return
@@ -318,8 +321,8 @@ class Connection(Waitable):
         return self.location
 
     def _fast_forward(self, skt):
-        parts = skt.recv_multipart()
-        self.skt.send_multipart(parts)
+        binary = skt.recv()
+        self.skt.send(binary)
 
     def _unblock(self, msg: Message):
         try:

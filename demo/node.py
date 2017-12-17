@@ -28,7 +28,7 @@ class Node:
         self.connection.disconnect()
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 app, location, pk, sk, spk = sys.argv
 node = Node(location, spk, KeyPair(public=pk, secret=sk))

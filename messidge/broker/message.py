@@ -36,42 +36,38 @@ class BrokerMessage:
     @staticmethod
     def receive_socket(socket):
         # Receive a message from the socket.
-        parts = socket.recv_multipart(copy=False)
-
-        if len(parts) != 6:
-            raise RuntimeError("Wrong number of parts in receive_socket")
+        rid, binary = socket.recv_multipart()
+        parts = cbor.loads(binary)
 
         rtn = BrokerMessage()
-        rtn.rid = bytes(parts[0].buffer)
-        rtn.nonce = bytes(parts[1].buffer)
-        rtn.command = bytes(parts[2].buffer)
-        rtn.uuid = bytes(parts[3].buffer)
-        rtn.params = bytes(parts[4].buffer)
-        rtn.bulk = bytes(parts[5].buffer)
+        rtn.rid = rid
+        rtn.nonce = parts[0]
+        rtn.command = parts[1]
+        rtn.uuid = parts[2]
+        rtn.params = parts[3]
+        rtn.bulk = parts[4]
         rtn.is_encrypted = True  # unless it's an auth message, but auth deals with that
         rtn.emit_pipe = None
         rtn.emit_socket = None
-
+        # print("receive_socket " + str(rtn))
         return rtn
 
     @staticmethod
     def receive_pipe(pipe, encrypted=False):
         # Receive a message from a multiprocessing pipe
-        parts = pipe.recv()
+        rid, parts = pipe.recv()
 
-        if len(parts) != 6:
-            return None
         rtn = BrokerMessage()
-        rtn.rid = parts[0]
-        rtn.nonce = parts[1]
-        rtn.command = parts[2]
-        rtn.uuid = parts[3]
-        rtn.params = parts[4]
-        rtn.bulk = parts[5]
+        rtn.rid = rid
+        rtn.nonce = parts[0]
+        rtn.command = parts[1]
+        rtn.uuid = parts[2]
+        rtn.params = parts[3]
+        rtn.bulk = parts[4]
         rtn.is_encrypted = encrypted
         rtn.emit_pipe = None
         rtn.emit_socket = None
-
+        # print("receive_pipe " + str(rtn))
         return rtn
 
     def replyable(self):
@@ -87,10 +83,12 @@ class BrokerMessage:
             self.bulk = bulk
 
         if self.emit_pipe is not None:
+            # print("reply send_pipe " + str(self))
             BrokerMessage.send_pipe(self.emit_pipe, self.rid, b'', b'', self.uuid, results, bulk=self.bulk)
             return
 
         if self.emit_socket is not None:
+            # print("reply send_socket " + str(self))
             BrokerMessage.send_socket(self.emit_socket, self.rid, b'', b'', self.uuid, results, bulk=self.bulk)
             return
 
@@ -132,30 +130,23 @@ class BrokerMessage:
             self.bulk = b''
 
     def forward_socket(self, skt):
+        # print("forward_socket " + str(self))
         BrokerMessage.send_socket(skt, self.rid, self.nonce, self.command, self.uuid, self.params, bulk=self.bulk)
 
     def forward_pipe(self, pipe):
+        # print("forward_pipe " + str(self))
         BrokerMessage.send_pipe(pipe, self.rid, self.nonce, self.command, self.uuid, self.params, bulk=self.bulk)
 
     @staticmethod
     def send_socket(socket, rid, nonce, command, uuid, params, bulk=b''):
         # Send a message to a client - easier to call send_cmd on the broker
-        parts = BrokerMessage._parts_to_send(rid, nonce, command, uuid, cbor.dumps(params), bulk)
-        socket.send_multipart(parts)
+        binary = cbor.dumps((nonce, command, uuid, params if params is not None else {}, bulk))
+        socket.send_multipart((rid, binary))
 
     @staticmethod
     def send_pipe(pipe, rid, nonce, command, uuid, params, bulk=b''):
-        parts = BrokerMessage._parts_to_send(rid, nonce, command, uuid, params, bulk)
-        pipe.send(parts)
-
-    @staticmethod
-    def _parts_to_send(rid, nonce, command, uuid, params, bulk):
-        return [rid,
-                nonce,
-                command,
-                uuid,
-                params if params is not None else {},
-                bulk]
+        pipe.send((rid, (nonce, command, uuid, params if params is not None else {}, bulk)))
 
     def __repr__(self):
-        return "<broker.message.BrokerMessage object at %x (command=%s uuid=%s)>" % (id(self), self.command, self.uuid)
+        return "<broker.message.BrokerMessage object at %x (command=%s uuid=%s encrypted=%s)>" % \
+               (id(self), self.command, self.uuid, self.is_encrypted)

@@ -36,18 +36,16 @@ class Message:
         :param session_key: The session key for this connection.
         :return: The received and decrypted message."""
         # parts are command, uuid, params, bulk
-        try:
-            rtn = Message(session_key)
-            parts = socket.recv_multipart(copy=False)
-            nonce = bytes(parts[0].buffer)
-            rtn.command = bytes(parts[1].buffer)
-            rtn.uuid = bytes(parts[2].buffer)
-            rtn.params, rtn.bulk = Message.decrypted_params(bytes(parts[3].buffer),
-                                                            bytes(parts[4].buffer),
-                                                            nonce,
-                                                            session_key)
-        except IndexError:
-            raise RuntimeError("A broken message was received from the socket")
+        rtn = Message(session_key)
+        binary = socket.recv()
+        parts = cbor.loads(binary)
+        nonce = bytes(parts[0])
+        rtn.command = bytes(parts[1])
+        rtn.uuid = bytes(parts[2])
+        rtn.params, rtn.bulk = Message.decrypted_params(parts[3],
+                                                        parts[4],
+                                                        nonce,
+                                                        session_key)
         
         logging.debug("Message.receive (%s:%s:%s)" %
                       (rtn.uuid.decode(),
@@ -130,7 +128,8 @@ class Message:
                  uuid,
                  params_encrypted,
                  bulk_encrypted]
-        socket.send_multipart(parts)
+        binary = cbor.dumps(parts)
+        socket.send(binary)
 
     @staticmethod
     def encrypted_params(params, bulk, nonce, session_key) -> (bytes, bytes):
@@ -147,7 +146,7 @@ class Message:
             bulk_encrypted = libnacl.crypto_secretbox(bulk, nonce, session_key) if bulk != b'' else b''
             return params_encrypted, bulk_encrypted
         else:
-            return cbor.dumps(params), bulk
+            return params, bulk
 
     @staticmethod
     def decrypted_params(params, bulk, nonce, session_key):
@@ -164,7 +163,7 @@ class Message:
             bulk_plaintext = libnacl.crypto_secretbox_open(bulk, nonce, session_key) if bulk != b'' else b''
             return cbor.loads(params_plaintext), bulk_plaintext
         else:
-            return cbor.loads(params), bulk
+            return params, bulk
 
     def __repr__(self):
         return "<messidge.message.Message object at %x (command=%s uuid=%s params=%s)>" % \

@@ -16,7 +16,7 @@ class Controller:
     commands = {b'resource_offer': cmd(['nodes'])}
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 # takes it's server address, pk and sk from the configuration in (default) ~/.messidge
 conn = Connection(default_location())
