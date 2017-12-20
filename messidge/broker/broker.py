@@ -20,7 +20,6 @@ import logging
 import random
 import libnacl.utils
 from base64 import b64encode
-from lru import LRU
 import os
 
 import zmq
@@ -40,19 +39,34 @@ class Broker:
 
     def __init__(self, keys: KeyPair, model, node_type, session_type, controller, *, base_port: int=2020,
                  identity_type=Identity, auth_type=Authenticate, account_confirm_type=AccountConfirmationServer,
-                 pre_run_callback=None, session_recovered_callback=None,
-                 session_destroy_callback=None, node_destroy_callback=None):
+                 pre_run_callback=None, node_destroy_callback=None,
+                 session_recovered_callback=None, session_destroy_callback=None,
+                 forwarding_insert_callback=None, forwarding_evict_callback=None):
         """:param keys: Server public/secret keys.
         :param model: Model object (derived from ModelMinimal).
         :param node_type: Class to construct node objects with (derived from NodeMinimal).
         :param session_type: Class to construct session objects with (derived from SessionMinimal).
         :param controller: Controller object (derived from ControllerMinimal).
-        :param identity_type: Potentially custom class to construct an identity server (see identity.py).
         :param base_port: TCP port to use plus the next one (so default is 2020 and 2021).
+        :param identity_type: Potentially custom class to construct an identity server (see identity.py).
+        :param auth_type: Class to authenticate with.
+        :param account_confirm_type: Class to use for confirming client accounts.
         :param pre_run_callback: Fired last thing before the message loop starts.
+                                 ...signature ()
+        :param node_destroy_callback: Fired last thing before a node is destroyed (was disconnected, say).
+                                      ...signature (rid)
         :param session_recovered_callback: Fired with the new rid when a session reconnects.
+                                           ...signature (session, old_rid, new_rid)
         :param session_destroy_callback: Fired last thing before a session is destroyed.
-        :param node_destroy_callback: Fired last thing before a node is destroyed (was disconnected, say)."""
+                                         ...signature (rid)
+        :param forwarding_insert_callback: Called when a new entry is made into the forwarding map.
+                                           ...signature (key, value)
+        :param forwarding_evict_callback: Called when an entry is removed from the forwarding map.
+                                          ...signature (key, value)
+
+        The eviction of an entry from the map is not to be used as an indication that an object has been destroyed,
+        it may be considerably after destruction or not at all.
+        """
         # Basic structure
         self.keys = keys
         self.model = model
@@ -73,7 +87,9 @@ class Broker:
         self.node_rid_pk = {}
         self.node_pk_rid = {}
         self.local_replies = {}  # map from uuid to function call
-        self.forward_replies = LRU(1024)  # map from msg.uuid to rid so we can forward replies
+        self.forwarding_insert_callback = forwarding_insert_callback
+        if forwarding_evict_callback:
+            model.forward_replies.set_callback(forwarding_evict_callback)
         self.identity = identity_type()
         self.authenticator = auth_type(self.identity, self.keys)
         self.account_confirm = account_confirm_type(self.identity, self.keys, base_port + 1)
@@ -212,7 +228,7 @@ class Broker:
             self.model.sessions[msg.rid] = session
             self.model.create_session_record(session)  # don't factor out, the callback needs to be called AFTER
             if self.session_recovered_callback is not None:
-                self.session_recovered_callback(session, msg.params['rid'])
+                self.session_recovered_callback(session, msg.params['rid'], msg.rid)
         else:
             # if an alias is connecting then it will need the original pk to be used because encryption
             session = self.session_type(msg.rid, pk)
@@ -381,8 +397,8 @@ class Broker:
                 raise ValueError("Message parameters must be a dictionary.")
 
             # is this a reply we're supposed to be forwarding?
-            if msg.uuid in self.forward_replies:
-                msg.rid = self.forward_replies[msg.uuid]
+            if msg.uuid in self.model.forward_replies:
+                msg.rid = self.model.forward_replies[msg.uuid]
                 # socket to forward to a node in plaintext, else send via a pipe to be encrypted
                 if msg.rid in self.node_rid_pk:
                     msg.emit_socket = self.skt
@@ -416,11 +432,13 @@ class Broker:
             try:
                 # cache node_pk (don't need to send this to the node itself)
                 node_pk = msg.params['node']
-                del msg.params['node']  #
+                del msg.params['node']
 
                 # record the source rid so we can forward replies
                 if msg.replyable():
-                    self.forward_replies[msg.uuid] = msg.rid
+                    self.model.forward_replies[msg.uuid] = msg.rid
+                    if self.forwarding_insert_callback:
+                        self.forwarding_insert_callback(msg.uuid, msg.rid)
 
                 # set the rid to the node and forward
                 msg.rid = self.node_pk_rid[node_pk]

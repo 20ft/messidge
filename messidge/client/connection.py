@@ -144,6 +144,7 @@ class Connection(Waitable):
 
         # block until allowed to go by start()
         self.loop_block.acquire()
+        self.mark_as_ready()
         self.loop.run()  # blocks until loop.stop is called or the loop catches a wayward exception
         self.exception = self.loop.caught_exception
 
