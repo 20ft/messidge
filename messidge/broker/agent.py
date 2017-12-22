@@ -55,16 +55,22 @@ class Agent(Process):
                 return
 
             for skt in ready_list:
-                if skt == self.decrypt_pipe[1]:
-                    msg = BrokerMessage.receive_pipe(self.decrypt_pipe[1], True)
-                    msg.decrypt(self.session_key)
-                    msg.forward_pipe(self.decrypt_pipe[1])
+                try:
+                    if skt == self.decrypt_pipe[1]:
+                        msg = BrokerMessage.receive_pipe(self.decrypt_pipe[1], True)
+                        msg.decrypt(self.session_key)
+                        msg.forward_pipe(self.decrypt_pipe[1])
+                        continue
+                except OSError:  # the pipe gets closed at an inappropriate moment
                     continue
 
-                if skt == self.encrypt_pipe[1]:
-                    msg = BrokerMessage.receive_pipe(self.encrypt_pipe[1], False)
-                    msg.encrypt(self.session_key)
-                    msg.forward_pipe(self.encrypt_pipe[1])
+                try:
+                    if skt == self.encrypt_pipe[1]:
+                        msg = BrokerMessage.receive_pipe(self.encrypt_pipe[1], False)
+                        msg.encrypt(self.session_key)
+                        msg.forward_pipe(self.encrypt_pipe[1])
+                        continue
+                except OSError:
                     continue
 
                 if skt == self.stop_pipe[1]:
