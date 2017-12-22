@@ -42,9 +42,9 @@ class ModelMinimal:
         self.sessions = {}
         self.forward_replies = LRU(1024)
 
-    def recent_forwards(self, maximum=10):
+    def recent_forwards(self, maximum=4):
         items = self.forward_replies.items()
-        if maximum < len(items):
+        if maximum > len(items):
             return items
         else:
             return items[:maximum]
