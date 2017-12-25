@@ -128,6 +128,10 @@ class Broker:
     def stop(self):
         """Stop background threads. Must be called to allow garbage collection and for a clean exit."""
         self.identity.stop()  # confirmation server just bins out when we exit (a daemon thread)
+        for rid in list(self.fd_rid.values()):
+            self.disconnect_for_rid(rid, is_definitely_user=True)
+        for rid in list(self.node_pk_rid.values()):
+            self.disconnect_for_rid(rid)
         if self.loop is not None:  # if can't bind socket, bins out before loop is constructed
             self.loop.stop()
 
