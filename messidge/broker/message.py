@@ -32,6 +32,7 @@ class BrokerMessage:
         self.nonce = None  # needed for decryption, a new one gets made when encrypting
         self.command = None
         self.uuid = None
+        self.time = None
 
     @staticmethod
     def receive_socket(socket):
@@ -49,6 +50,7 @@ class BrokerMessage:
         rtn.is_encrypted = True  # unless it's an auth message, but auth deals with that
         rtn.emit_pipe = None
         rtn.emit_socket = None
+        rtn.time = None
         # print("receive_socket " + str(rtn))
         return rtn
 
@@ -67,6 +69,7 @@ class BrokerMessage:
         rtn.is_encrypted = encrypted
         rtn.emit_pipe = None
         rtn.emit_socket = None
+        rtn.time = None
         # print("receive_pipe " + str(rtn))
         return rtn
 
