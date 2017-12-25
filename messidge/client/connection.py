@@ -17,6 +17,7 @@ import libnacl
 import libnacl.utils
 import cbor
 import psutil
+import time
 from threading import Thread
 from _thread import allocate_lock, get_ident
 from base64 import b64decode
@@ -122,11 +123,20 @@ class Connection(Waitable):
 
         # create the trunk socket - remember sockets must be created on the thread they are used on
         logging.info("Connecting to: %s:2020" % self.location)
-        self.skt = zmq.Context.instance().socket(zmq.DEALER)
-        self.skt.set_hwm(0)  # infinite, don't drop or block because that would be bad
-        self.skt.setsockopt(zmq.LINGER, 0)
-        self.skt_monitor = self.skt.get_monitor_socket()
-        self.skt.connect("tcp://%s:2020" % self.connect_ip)
+        working = False
+        while not working:
+            try:
+                self.skt = zmq.Context.instance().socket(zmq.DEALER)
+                self.skt.set_hwm(0)  # infinite, don't drop or block because that would be bad
+                self.skt.setsockopt(zmq.LINGER, 0)
+                self.skt.connect("tcp://%s:2020" % self.connect_ip)
+                self.skt_monitor = self.skt.get_monitor_socket()
+                working = True
+            except zmq.error.ZMQError:
+                del self.skt
+                self.skt = None
+                logging.info("Retrying ZMQ socket")
+                time.sleep(1)
         logging.debug("Trunk socket is: %x" % id(self.skt))
 
         # create the cross thread socket for forwarding
