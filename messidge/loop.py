@@ -65,7 +65,6 @@ class Loop:
                 # fetch the events
                 events = self.p.poll(timeout=500)
                 tmr = time.time()
-                msg = None
 
                 # idle?
                 if len(events) == 0:
@@ -96,15 +95,19 @@ class Loop:
 
                     try:
                         # is this a hooked reply? - these may well deal with (or raise) exceptions...
-                        if msg.uuid in self.reply_callbacks:
+                        try:
                             self.reply_callbacks[msg.uuid](msg)
                             continue
+                        except KeyError:
+                            pass
 
                         # non-main thread exceptions just bin out and don't take the app down
                         # so the message loop catches them and waits for the main thread to deal with it.
-                        if 'exception' in msg.params:
+                        try:
                             logging.debug("Message loop caught an exception: " + msg.params["exception"])
                             raise ValueError(msg.params["exception"])
+                        except KeyError:
+                            pass
 
                         # hopefully, then, a vanilla command
                         try:
@@ -221,7 +224,7 @@ class Loop:
         """Register an object.method to be called whenever the message loop has idle time.
 
         :param obj: The object.method to be called - no additional parameters are passed."""
-        """Idles get invoked every time the poll on the message loop times out (ie has nothing to do)"""
+        # Idles get invoked every time the poll on the message loop times out (ie has nothing to do)
         if obj not in self.idle:
             self.idle.add(obj)
 
@@ -229,8 +232,10 @@ class Loop:
         """Unregister an object.method from the message loop's idle time.
 
         :param obj: The object.method to be unregistered."""
-        if obj in self.idle:
+        try:
             self.idle.remove(obj)
+        except KeyError:
+            pass
 
     def on_value_error(self, callback):
         """Register an alternative to raising exceptions for ValueError exceptions coming over the wire.
