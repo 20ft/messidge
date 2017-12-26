@@ -127,9 +127,14 @@ class Broker:
 
     def stop(self):
         """Stop background threads. Must be called to allow garbage collection and for a clean exit."""
-        self.identity.stop()  # confirmation server just bins out when we exit (a daemon thread)
-        for rid in list(self.fd_rid.values()):
-            self.disconnect_for_rid(rid, is_definitely_user=True)
+        # confirmation server just bins out when we exit (a daemon thread)
+        self.identity.stop()
+
+        # DO NOT explicitly disconnect user sessions
+        # for rid in list(self.fd_rid.values()):
+        #     self.disconnect_for_rid(rid, is_definitely_user=True)
+
+        # Disconnect nodes
         for rid in list(self.node_pk_rid.values()):
             self.disconnect_for_rid(rid)
         if self.loop is not None:  # if can't bind socket, bins out before loop is constructed
@@ -345,7 +350,7 @@ class Broker:
         # receive from the socket
         try:
             msg = BrokerMessage.receive_socket(skt)
-        except RuntimeError as e:
+        except BaseException as e:
             logging.info("Something bad happened with a message coming over a socket: " + str(e))
             return
 
