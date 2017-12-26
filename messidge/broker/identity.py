@@ -44,7 +44,7 @@ class Identity:
         :param email: email address of the user.
         :return: confirmation token to give to the user."""
         token = shortuuid.uuid()
-        self.db.async("INSERT INTO pending (token, email) VALUES (?, ?)", (token, email))
+        self.db.mutate("INSERT INTO pending (token, email) VALUES (?, ?)", (token, email))
         return token
 
     def pending_users_for_token(self, token) -> []:
@@ -60,8 +60,8 @@ class Identity:
         :param pk_b64: The user's primary key - base64 encoded string.
         :param email: The user's email address.
         :param config: A json description of any configuration to be associated with the user."""
-        self.db.async("DELETE FROM pending WHERE email=?", (email,))
-        self.db.async("INSERT INTO users (pk, email, json) VALUES (?, ?, ?)", (pk_b64, email, config))
+        self.db.mutate("DELETE FROM pending WHERE email=?", (email,))
+        self.db.mutate("INSERT INTO users (pk, email, json) VALUES (?, ?, ?)", (pk_b64, email, config))
 
     def user_config_from_db(self, pk_b64: str) -> (str, str):  # is used to check for presence in the db, too
         """Returns the json configuration for a user.
@@ -81,7 +81,7 @@ class Identity:
 
         :param pk_b64: The node's primary key - base64 encoded string.
         :param config: A json description of any configuration to be associated with the node."""
-        self.db.async("INSERT INTO nodes (pk, json) VALUES (?, ?)", (pk_b64, config))
+        self.db.mutate("INSERT INTO nodes (pk, json) VALUES (?, ?)", (pk_b64, config))
 
     def node_config_from_db(self, pk_b64: str) -> str:
         """Returns the json configuration of a node.
@@ -98,14 +98,12 @@ class AccountConfirmationServer(Thread):
     """A simple HTTP server for confirming accounts"""
     # has single use tokens so no real need to SSL
     identity = None
-    db = None
     pk = None
     port = None
 
     def __init__(self, identity, keys, port):
         super().__init__(name=str("Account Confirmation Server"), daemon=True)
         AccountConfirmationServer.identity = identity
-        AccountConfirmationServer.db = identity.db.underlying()
         AccountConfirmationServer.pk = keys.public
         AccountConfirmationServer.port = port
         self.start()
