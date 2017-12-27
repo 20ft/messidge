@@ -40,14 +40,7 @@ class ModelMinimal:
     def __init__(self):
         self.nodes = {}
         self.sessions = {}
-        self.forward_replies = LRU(1024)
-
-    def recent_forwards(self, maximum=4):
-        items = self.forward_replies.items()
-        if maximum > len(items):
-            return items
-        else:
-            return items[:maximum]
+        self.forward_replies = LRU(2048)
 
     def resources(self, pk):
         """Overload this method to return a resource offer to a newly connected client.
