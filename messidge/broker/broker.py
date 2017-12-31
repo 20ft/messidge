@@ -20,6 +20,7 @@ import logging
 import random
 import libnacl.utils
 from base64 import b64encode
+from binascii import hexlify
 import os
 
 import zmq
@@ -127,9 +128,6 @@ class Broker:
 
     def stop(self):
         """Stop background threads. Must be called to allow garbage collection and for a clean exit."""
-        # confirmation server just bins out when we exit (a daemon thread)
-        self.identity.stop()
-
         # DO NOT explicitly disconnect user sessions
         # for rid in list(self.fd_rid.values()):
         #     self.disconnect_for_rid(rid, is_definitely_user=True)
@@ -155,7 +153,7 @@ class Broker:
         try:
             agent = self.rid_agent[rid]
         except KeyError:
-            logging.warning("Failed sending command, no agent for rid: " + str(rid))
+            logging.warning("Failed sending command, no agent for rid: " + hexlify(rid).decode())
             return
         if agent is None:
             BrokerMessage.send_socket(self.skt, rid, b'', command, uuid, params, bulk)
@@ -167,8 +165,9 @@ class Broker:
         """Set the routing id for the next socket that connects."""
         # gives the next connection a unique (but known) routing id
         self.next_connection_rid = bytes([random.randint(0, 255) for _ in range(0, 4)])
-        logging.debug("Set next rid to: " + str(self.next_connection_rid))
+        logging.debug("Set next rid to: " + hexlify(self.next_connection_rid).decode())
         self.skt.set(zmq.CONNECT_RID, self.next_connection_rid)
+
 
     def disconnect_for_rid(self, rid, *, is_definitely_user=False):
         """Disconnect a client.
@@ -188,7 +187,7 @@ class Broker:
                 del self.fd_pipe[agent.encrypt_pipe[0].fileno()]
                 del self.fd_pipe[agent.decrypt_pipe[0].fileno()]
         except KeyError:
-            logging.debug("While disconnecting rid could not find agent or None: " + str(rid))
+            logging.debug("While disconnecting rid could not find agent or None: " + hexlify(rid).decode())
 
         # Remove the right objects
         if agent is None and not is_definitely_user:
@@ -227,7 +226,8 @@ class Broker:
         if msg.params['rid'] in self.model.sessions:  # pre-existing session
             # Update rids so the session now has the new rid
             session = self.model.sessions[msg.params['rid']]
-            logging.info("Recovering session: %s -> %s" % (str(msg.params['rid']), str(msg.rid)))
+            logging.info("Recovering session: %s -> %s" %
+                         (hexlify(msg.params['rid']).decode(), hexlify(msg.rid).decode()))
             del self.model.sessions[msg.params['rid']]
             self.model.delete_session_record(msg.params['rid'])
             session.rid = msg.rid  # so now the session "belongs" to the new rid
@@ -245,7 +245,7 @@ class Broker:
             self.model.create_session_record(session)
 
         resources = self.model.resources(pk)
-        logging.info("Connected session: " + str(msg.rid))
+        logging.info("Connected session: " + hexlify(msg.rid).decode())
 
         # create the encryption agent
         # we register the filenumber because zmq.poll won't poll a pipe object (but it will for a descriptor)
@@ -256,8 +256,8 @@ class Broker:
                                      self._event_pipe, comment="Decryption pipe, agent=" + str(msg.rid))
         self.fd_pipe[agent.encrypt_pipe[0].fileno()] = agent.encrypt_pipe[0]
         self.fd_pipe[agent.decrypt_pipe[0].fileno()] = agent.decrypt_pipe[0]
-        logging.debug("Encrypt pipe for rid: %s -> %s" % (str(msg.rid), agent.encrypt_pipe[0].fileno()))
-        logging.debug("Decrypt pipe for rid: %s -> %s" % (str(msg.rid), agent.decrypt_pipe[0].fileno()))
+        logging.debug("Encrypt pipe for rid: %s -> %s" % (hexlify(msg.rid).decode(), agent.encrypt_pipe[0].fileno()))
+        logging.debug("Decrypt pipe for rid: %s -> %s" % (hexlify(msg.rid).decode(), agent.decrypt_pipe[0].fileno()))
         self.rid_agent[msg.rid] = agent
 
         # send the session key to the other end
@@ -301,13 +301,14 @@ class Broker:
         evt = recv_monitor_message(skt)
         descriptor = evt['value']
         if evt['event'] == zmq.EVENT_ACCEPTED:  # the handshake will sort itself out
-            logging.debug("Received a connection: %s -> %s" % (descriptor, str(self.next_connection_rid)))
+            logging.debug("Received a connection: %s -> %s" % (descriptor, hexlify(self.next_connection_rid).decode()))
             self.fd_rid[descriptor] = self.next_connection_rid
 
         # disconnection
         if evt['event'] == zmq.EVENT_DISCONNECTED:
             if descriptor not in self.fd_rid:
-                logging.warning("Caught disconnection from a fd that has no connection to a rid: " + str(descriptor))
+                logging.warning("Caught disconnection from a fd that has no connection to a rid: " +
+                                hexlify(descriptor).decode())
                 return
             else:
                 logging.debug("Caught disconnection: " + str(descriptor))
@@ -321,7 +322,7 @@ class Broker:
         try:
             pk = self.node_rid_pk[rid]
         except KeyError:
-            logging.debug("Can't disconnect node, gone already: " + str(rid))
+            logging.debug("Can't disconnect node, gone already: " + hexlify(rid).decode())
             return
 
         del self.node_rid_pk[rid]
@@ -336,14 +337,14 @@ class Broker:
         try:
             sess = self.model.sessions[rid]
         except KeyError:
-            logging.debug("Closing session not held in the model, ignoring: " + str(rid))
+            logging.debug("Closing session not held in the model, ignoring: " + hexlify(rid).decode())
             return
         sess.close(self)
 
         del self.model.sessions[rid]
         if self.session_destroy_callback is not None:
             self.session_destroy_callback(rid)
-        logging.info("Session disconnected: " + str(rid))
+        logging.info("Session disconnected: " + hexlify(rid).decode())
 
     # Entrypoint for events that have come in over zmq
     def _event_socket(self, skt):
@@ -367,11 +368,11 @@ class Broker:
         # If a new connection.....
         except KeyError:
             success, agent = self._handshake(msg, skt)
+            self.set_next_rid()
             if not success:  # authentication failed
                 msg.params = dict()
                 msg.forward_socket(skt)
                 return
-            self.set_next_rid()
             self.rid_agent[msg.rid] = agent  # may be None but marks the rid as being valid anyway
             return
 
@@ -389,7 +390,7 @@ class Broker:
         # this may be a cry for help from the encryption agent
         agent = self.rid_agent[msg.rid]
         if msg.params is None and msg.bulk is None:
-            logging.error("Encryption agent could not decrypt: " + str(agent))
+            logging.error("Encryption agent could not decrypt: " + hexlify(agent).decode())
             self.disconnect_for_rid(msg.rid)
             return
 
@@ -458,7 +459,7 @@ class Broker:
 
         except ValueError as e:
             logging.info("Client %s called %s and raised a ValueError: %s" %
-                         (str(msg.rid), str(msg.command), str(e)))
+                         (hexlify(msg.rid).decode(), msg.command.decode(), str(e)))
             try:
                 msg.reply({"exception": str(e)})
             except BaseException as e:

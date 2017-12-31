@@ -347,7 +347,7 @@ class Connection(Waitable):
         """Call from non-main threads to return a value error to the client"""
         if msg.replyable():
             msg.reply(self.send_skt(), {"exception": str(e)})
-            logging.info("Client called %s and raised a ValueError: %s" % (str(msg.command), str(e)))
+            logging.info("Client called %s and raised a ValueError: %s" % (msg.command.decode(), str(e)))
         else:
             logging.warning("Unable to return ValueError to client: " + str(e))
 
