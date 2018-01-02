@@ -58,7 +58,7 @@ class Loop:
                 latency = ((time.time() - tmr) * 1000)
                 if latency > 10:
                     if latency < 1000:
-                        logging.debug("Event loop stalled for (ms): " + str(latency))
+                        logging.info("Event loop stalled for (ms): " + str(latency))
                     else:
                         logging.warning("Event loop stalled for (ms): " + str(latency))
 

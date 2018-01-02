@@ -40,7 +40,7 @@ class ModelMinimal:
     def __init__(self):
         self.nodes = {}
         self.sessions = {}
-        self.forward_replies = LRU(2048)
+        self.long_term_forwards = LRU(2048)
 
     def resources(self, pk):
         """Overload this method to return a resource offer to a newly connected client.

@@ -276,6 +276,7 @@ class Connection(Waitable):
         thread = get_ident()
         if thread == self.loop_thread:
             raise RuntimeError("Cannot send a blocking command on the loop thread")
+        cmdstart = time.time()
 
         # acquire a lock, wait for the reply
         uuid = shortuuid.uuid().encode()
@@ -293,6 +294,7 @@ class Connection(Waitable):
         self.uuid_blockreply[uuid].release()
         del self.uuid_blockreply[uuid]
         del self.uuid_blockresults[uuid]
+        logging.debug("send_blocking_cmd blocked for: " + str(time.time() - cmdstart))
 
         # raise exceptions if either in the message or caught on a background thread
         if 'exception' in msg.params:

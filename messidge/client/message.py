@@ -42,10 +42,13 @@ class Message:
         nonce = bytes(parts[0])
         rtn.command = bytes(parts[1])
         rtn.uuid = bytes(parts[2])
-        rtn.params, rtn.bulk = Message.decrypted_params(parts[3],
-                                                        parts[4],
-                                                        nonce,
-                                                        session_key)
+        try:
+            rtn.params, rtn.bulk = Message.decrypted_params(parts[3],
+                                                            parts[4],
+                                                            nonce,
+                                                            session_key)
+        except TypeError:
+            pass
         
         logging.debug("Message.receive (%s:%s:%s)" %
                       (rtn.uuid.decode(),
@@ -78,12 +81,13 @@ class Message:
         :return: True/False"""
         return self.uuid != b''
 
-    def reply(self, socket, results=None, bulk=b''):
+    def reply(self, socket, results=None, bulk=b'', *, long_term=False):
         """Reply to a previously received message.
 
         :param socket: the socket to use to send the message.
         :param results: an optional dictionary of results to include as part of the reply.
-        :param bulk: an optional bulk data blob."""
+        :param bulk: an optional bulk data blob.
+        :param long_term: optionally keep this channel open for more replies."""
         if not self.replyable():
             logging.warning("Tried to reply to a non-replyable message: " + str(self))
             return
@@ -94,7 +98,8 @@ class Message:
                        list(results.keys()) if isinstance(results, dict) else "--"))
         if results is None:
             results = {}
-        Message.send(socket, b'', self.session_key, results, uuid=self.uuid, bulk=bulk, trace=False)
+        Message.send(socket, b'ka' if long_term else b'',
+                     self.session_key, results, uuid=self.uuid, bulk=bulk, trace=False)
 
     def forward(self, socket):
         """Forward a message unchanged through another socket.
@@ -159,9 +164,13 @@ class Message:
         :return: A (bytes, bytes) tuple for the decrypted params and bulk data.
         """
         if session_key is not None:
-            params_plaintext = libnacl.crypto_secretbox_open(params, nonce, session_key)
-            bulk_plaintext = libnacl.crypto_secretbox_open(bulk, nonce, session_key) if bulk != b'' else b''
-            return cbor.loads(params_plaintext), bulk_plaintext
+            try:
+                params_plaintext = libnacl.crypto_secretbox_open(params, nonce, session_key)
+                bulk_plaintext = libnacl.crypto_secretbox_open(bulk, nonce, session_key) if bulk != b'' else b''
+                return cbor.loads(params_plaintext), bulk_plaintext
+            except TypeError as e:
+                print("decrypted_params fail: %s, %X, %X" % (params, nonce, session_key))
+                exit(1)
         else:
             return params, bulk
 

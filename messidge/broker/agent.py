@@ -15,6 +15,7 @@ import libnacl
 import libnacl.utils
 import logging
 from base64 import b64encode
+from binascii import hexlify
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import wait
 from .message import BrokerMessage
@@ -38,6 +39,7 @@ class Agent(Process):
         # go
         self.running = False
         self.start()
+        logging.debug("Started agent for rid: " + hexlify(rid).decode())
 
     def encrypted_session_key(self, nonce, secret_binary):
         return libnacl.crypto_box(self.session_key, nonce, self.pk, secret_binary)
@@ -85,7 +87,7 @@ class Agent(Process):
         self.encrypt_pipe[1].close()
         self.stop_pipe[0].close()
         self.stop_pipe[1].close()
-        logging.debug("Stopped agent for rid: " + str(self.rid))
+        logging.debug("Stopped agent for rid: " + hexlify(self.rid).decode())
         self.running = False
 
     def state(self):
