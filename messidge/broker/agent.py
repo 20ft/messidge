@@ -16,6 +16,7 @@ import libnacl.utils
 import logging
 from base64 import b64encode
 from binascii import hexlify
+import os
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import wait
 from .message import BrokerMessage
@@ -48,6 +49,10 @@ class Agent(Process):
         self.stop_pipe[0].send(b'')
 
     def run(self):
+        # raise my priority
+        os.setpriority(os.PRIO_PROCESS, 0, -15)
+
+        # run a message loop
         self.running = True
         while self.running:
             try:

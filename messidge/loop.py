@@ -50,24 +50,17 @@ class Loop:
     def run(self):
         """Message loop. Runs single threaded (usually but not necessarily a background thread)."""
         self.running_thread = get_ident()
-        tmr = time.time()
+        last_idle = time.time()
         logging.debug("Message loop started")
         while self.running_thread is not None:
             try:
-                # warning if the loop stalls
-                latency = ((time.time() - tmr) * 1000)
-                if latency > 10:
-                    if latency < 1000:
-                        logging.info("Event loop stalled for (ms): " + str(latency))
-                    else:
-                        logging.warning("Event loop stalled for (ms): " + str(latency))
-
                 # fetch the events
                 events = self.p.poll(timeout=500)
-                tmr = time.time()
 
-                # idle?
-                if len(events) == 0:
+                # idle? or every five seconds at worst
+                tme = time.time()
+                if len(events) == 0 or tme - last_idle > 5:
+                    last_idle = tme
                     # should be be quitting?
                     if self.running_thread is None:  # yes, leave loop
                         break

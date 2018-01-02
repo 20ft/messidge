@@ -193,6 +193,7 @@ class Broker:
             self._disconnect_session(rid)
         else:
             self._disconnect_node(rid)
+        del agent
 
     def _handshake(self, msg, skt):
         # gets called via the event loop just like everything else
@@ -429,7 +430,7 @@ class Broker:
                         msg.emit_pipe = self.rid_agent[msg.rid].encrypt_pipe[0]
                         msg.forward()
                     except KeyError:
-                        logging.debug("Wanted to send a message reply to a disconnected session (dropped).")
+                        logging.debug("Wanted to send a message reply to a disconnected session: " + msg.uuid.decode())
                     return
 
                 # message will be forwarded to a node in plaintext
