@@ -102,15 +102,15 @@ class Connection(Waitable):
     def wait_until_complete(self):
         """Blocks until the message loop exits"""
         self.thread.join()
-        
+
         # re-raises (on the main thread) if the loop caught an exception
         if self.exception is not None:
             raise self.exception
 
     def disconnect(self):
         """Stop the message loop and disconnect - without this object cannot be garbage collected"""
-        for skt in self.thread_skt.values():
-            skt.disconnect(self.inproc_name)
+        for thread_id in list(self.thread_skt.keys()):
+            self.destroy_send_skt_for(thread_id)
         self.loop.stop()
         self.thread_skt.clear()
         self.connect_callbacks.clear()
@@ -127,7 +127,6 @@ class Connection(Waitable):
         while not working:
             try:
                 self.skt = zmq.Context.instance().socket(zmq.DEALER)
-                self.skt.set_hwm(0)  # infinite, don't drop or block because that would be bad
                 self.skt.setsockopt(zmq.LINGER, 0)
                 self.skt.connect("tcp://%s:2020" % self.connect_ip)
                 self.skt_monitor = self.skt.get_monitor_socket()
@@ -226,16 +225,18 @@ class Connection(Waitable):
             new_skt = zmq.Context.instance().socket(zmq.DEALER)
             new_skt.connect(self.inproc_name)
             self.thread_skt[thread] = new_skt
-            logging.debug("Created a per-thread socket for: " + str(thread))
+            # logging.debug("Created a per-thread socket for: " + str(thread))
             return new_skt
 
     def destroy_send_skt(self):
         """Closes and removes the send_skt for the calling thread."""
-        thread = get_ident()
+        self.destroy_send_skt_for(get_ident())
+
+    def destroy_send_skt_for(self, thread):
         try:
             self.thread_skt[thread].close()
             del self.thread_skt[thread]
-            logging.debug("Destroyed per-thread socket for: " + str(thread))
+            # logging.debug("Destroyed per-thread socket for: " + str(thread))
         except KeyError:
             pass
 

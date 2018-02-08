@@ -307,8 +307,7 @@ class Broker:
         # disconnection
         if evt['event'] == zmq.EVENT_DISCONNECTED:
             if descriptor not in self.fd_rid:
-                logging.warning("Caught disconnection from a fd that has no connection to a rid: " +
-                                hexlify(descriptor).decode())
+                logging.warning("Caught disconnection from a fd that has no connection to a rid")
                 return
             else:
                 logging.debug("Caught disconnection: " + str(descriptor))
@@ -416,13 +415,19 @@ class Broker:
 
                 # does this message want to be part of a long term reply?
                 if msg.command == b'ka':  # i.e. keep-alive
-                    if msg.uuid not in self.model.long_term_forwards:
-                        logging.info("Long term forwarding: %s -> %s" % (msg.uuid.decode(), hexlify(msg.rid).decode()))
-                        self.model.long_term_forwards[msg.uuid] = msg.rid
-                        self.forwarding_insert_callback(msg.uuid, msg.rid)  # persists
+                    msg.command = b''
+                    if msg.rid in self.rid_agent:
+                        if msg.uuid not in self.model.long_term_forwards:
+                            logging.debug("Long term forwarding: %s -> %s" % (msg.uuid.decode(), hexlify(msg.rid).decode()))
+                            self.model.long_term_forwards[msg.uuid] = msg.rid
+                            self.forwarding_insert_callback(msg.uuid, msg.rid)  # persists
+                        else:
+                            logging.debug("Long term forwarded: " + msg.uuid.decode())
+                            msg.rid = self.model.long_term_forwards[msg.uuid]
                     else:
-                        logging.debug("Long term forwarded: " + msg.uuid.decode())
-                        msg.rid = self.model.long_term_forwards[msg.uuid]
+                        logging.debug("Message wanted long term forwarding but session has gone: " +
+                                      hexlify(msg.rid).decode())
+                        return
 
                 # if forwarding to a session, try to do so now
                 if msg.rid not in self.node_rid_pk:

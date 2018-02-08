@@ -111,10 +111,10 @@ class Loop:
                         try:
                             handler = handlers[msg.command]
                         except KeyError:
-                            logging.warning("No handler was found for: %s (uuid=%s)" % (msg.command, msg.uuid))
+                            # logging.warning("No handler was found for: %s (uuid=%s)" % (msg.command, msg.uuid))
                             continue
 
-                        logging.debug("Handling command: " + str(msg.command))
+                        # logging.debug("Handling command: " + str(msg.command))
                         Loop.check_basic_properties(msg, handler)
                         getattr(obj, '_' + msg.command.decode())(msg)
 
@@ -157,13 +157,13 @@ class Loop:
         # function signature: def callback(self, socket)
         # object can be a zmq socket or a file descriptor
         if obj in self.exclusive_handlers:
-            raise RuntimeError("Tried to register a socket exclusively twice")
+            raise RuntimeError("Tried to register a socket exclusively twice: %s (%s)" % (str(obj), comment))
         if obj in self.command_handlers:
-            raise RuntimeError("Socket is already registered with commands")
+            raise RuntimeError("Socket is already registered with commands: %s (%s)" % (str(obj), comment))
 
         self.exclusive_handlers[obj] = handler
         self.p.register(obj, zmq.POLLIN)
-        logging.debug("Message loop has registered exclusive: " + comment)
+        logging.debug("Message loop has registered exclusive: %s (%s)" % (str(obj), comment))
 
     def unregister_exclusive(self, obj):
         """Unregister an object as an exclusive handler.
@@ -174,7 +174,7 @@ class Loop:
             self.p.unregister(obj)
             logging.debug("Message loop has unregistered exclusive: " + str(obj))
         except KeyError:
-            logging.warning("Tried to unregister a socket that was not registered (exclusive): " + str(obj))
+            pass
 
     def register_commands(self, skt, obj, commands, *, comment: str=""):
         """Register command callbacks.
@@ -184,9 +184,9 @@ class Loop:
         :param commands: A dictionary of {b'command': handler, ...}.
         :param comment: A string to help clarify debug logs."""
         if skt in self.exclusive_handlers:
-            raise RuntimeError("Socket is already registered as exclusive")
+            raise RuntimeError("Socket is already registered as exclusive: " + comment)
         if skt in self.command_handlers:
-            raise RuntimeError("Tried to register a series of commands twice for the same socket")
+            raise RuntimeError("Tried to register a series of commands twice for the same socket: " + comment)
         for command in commands.keys():
             if not isinstance(command, bytes):
                 raise RuntimeError("Pass commands as bytes, not strings")

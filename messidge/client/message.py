@@ -50,10 +50,10 @@ class Message:
         except TypeError:
             pass
         
-        logging.debug("Message.receive (%s:%s:%s)" %
-                      (rtn.uuid.decode(),
-                       rtn.command.decode(),
-                       list(rtn.params.keys()) if isinstance(rtn.params, dict) else "--"))
+        # logging.debug("Message.receive (%s:%s:%s)" %
+        #               (rtn.uuid.decode(),
+        #                rtn.command.decode(),
+        #                list(rtn.params.keys()) if isinstance(rtn.params, dict) else "--"))
         return rtn
 
     @staticmethod
@@ -92,10 +92,10 @@ class Message:
             logging.warning("Tried to reply to a non-replyable message: " + str(self))
             return
 
-        logging.debug("Message.reply: (%s:%s:%s)" %
-                      (self.uuid.decode(),
-                       self.command.decode(),
-                       list(results.keys()) if isinstance(results, dict) else "--"))
+        # logging.debug("Message.reply: (%s:%s:%s)" %
+        #               (self.uuid.decode(),
+        #                self.command.decode(),
+        #                list(results.keys()) if isinstance(results, dict) else "--"))
         if results is None:
             results = {}
         Message.send(socket, b'ka' if long_term else b'',
@@ -119,11 +119,11 @@ class Message:
         :param bulk: An optional piece of bulk data to transport.
         :param trace: Set to false to disable debug logging on this occasion.
         """
-        if trace:
-            logging.debug("Message.send: (%s:%s:%s)" %
-                          (uuid.decode(),
-                           command.decode(),
-                           list(params.keys()) if isinstance(params, dict) else "--"))
+        # if trace:
+        #     logging.debug("Message.send: (%s:%s:%s)" %
+        #                   (uuid.decode(),
+        #                    command.decode(),
+        #                    list(params.keys()) if isinstance(params, dict) else "--"))
         if params is None:
             params = {}
         nonce = libnacl.utils.rand_nonce()
