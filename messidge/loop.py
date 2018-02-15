@@ -67,7 +67,6 @@ class Loop:
                     # otherwise do our idle tasks
                     for idle_task in set(self.idle):
                         idle_task()
-                    continue
 
                 # Deal with all the events
                 for event in events:

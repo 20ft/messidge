@@ -297,8 +297,6 @@ class Connection(Waitable):
         # raise exceptions if either in the message or caught on a background thread
         if 'exception' in msg.params:
             raise ValueError(msg.params['exception'])
-        if self.exception:
-            raise self.exception
         return msg
 
     def register_commands(self, obj, commands):

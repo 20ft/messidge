@@ -35,6 +35,10 @@ class Identity:
         :param directory: The directory in which to place the database (identity.sqlite3)"""
         self.db = SqlCache(os.path.expanduser(directory), 'identity', ident_init)
 
+    def stop(self):
+        """Stop the background (SqlCache) thread before closing"""
+        self.db.close()
+
     def create_pending_user(self, email) -> str:
         """Registers the intention for someone to become a registered user
 
