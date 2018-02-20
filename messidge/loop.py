@@ -98,7 +98,7 @@ class Loop:
                         try:
                             logging.debug("Message loop caught an exception: " + msg.params["exception"])
                             raise ValueError(msg.params["exception"])
-                        except KeyError, TypeError:
+                        except (KeyError, TypeError):
                             pass
 
                         # hopefully, then, a vanilla command
