@@ -13,9 +13,6 @@
 
 import libnacl
 import libnacl.utils
-import logging
-from base64 import b64encode
-from binascii import hexlify
 import os
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import wait
@@ -23,15 +20,10 @@ from .message import BrokerMessage
 
 
 class Agent(Process):
-    """Multiprocess async encryption"""
+    """Subprocess async encryption"""
 
-    def __init__(self, rid, pk):
-        super().__init__(target=self.run, name=b64encode(pk).decode())
-        # basics
-        self.rid = rid
-        self.pk = pk
-        self.session_key = libnacl.utils.salsa_key()
-
+    def __init__(self):
+        super().__init__(target=self.run)
         # create the sockets to send work up here
         self.encrypt_pipe = Pipe()
         self.decrypt_pipe = Pipe()
@@ -40,10 +32,9 @@ class Agent(Process):
         # go
         self.running = False
         self.start()
-        logging.debug("Started agent for rid: " + hexlify(rid).decode())
 
-    def encrypted_session_key(self, nonce, secret_binary):
-        return libnacl.crypto_box(self.session_key, nonce, self.pk, secret_binary)
+    def encrypted_session_key(self, session_key, nonce, pk, secret_binary):
+        return
 
     def stop(self):
         self.stop_pipe[0].send(b'')
@@ -65,7 +56,7 @@ class Agent(Process):
                 try:
                     if skt == self.decrypt_pipe[1]:
                         msg = BrokerMessage.receive_pipe(self.decrypt_pipe[1], True)
-                        msg.decrypt(self.session_key)
+                        msg.decrypt()
                         msg.forward_pipe(self.decrypt_pipe[1])
                         continue
                 except OSError:  # the pipe gets closed at an inappropriate moment
@@ -74,7 +65,7 @@ class Agent(Process):
                 try:
                     if skt == self.encrypt_pipe[1]:
                         msg = BrokerMessage.receive_pipe(self.encrypt_pipe[1], False)
-                        msg.encrypt(self.session_key)
+                        msg.encrypt()
                         msg.forward_pipe(self.encrypt_pipe[1])
                         continue
                 except OSError:
@@ -92,12 +83,4 @@ class Agent(Process):
         self.encrypt_pipe[1].close()
         self.stop_pipe[0].close()
         self.stop_pipe[1].close()
-        logging.debug("Stopped agent for rid: " + hexlify(self.rid).decode())
         self.running = False
-
-    def state(self):
-        return {'pk': b64encode(self.pk).decode()}
-
-    def __repr__(self):
-        return "<messidge.broker.Agent object at %x (rid=%s)>" % (id(self), self.rid)
-

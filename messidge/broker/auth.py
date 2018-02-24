@@ -37,7 +37,7 @@ class Authenticate:
             email, json = self.identity.user_config_from_db(pk)
             logging.info("Authentication succeeded as user: " + email)
             return True, True, json
-        except ValueError as e:  # throws if not a user (perhaps a node)
+        except ValueError:  # throws if not a user (perhaps a node)
             pass
 
         # A node, then?
@@ -45,7 +45,7 @@ class Authenticate:
             json = self.identity.node_config_from_db(pk)
             logging.info("Authentication succeeded as node: " + str(pk))
             return True, False, json
-        except ValueError as e:  # oh, we failed then
+        except ValueError:  # oh, we failed then
             pass
 
         # bugger

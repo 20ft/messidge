@@ -83,8 +83,8 @@ class Broker:
         self.skt = None  # initialised when run
         self.skt_monitor = None
         self.fd_rid = {}  # map from file descriptor to remote id so we know who has disconnected
-        self.fd_pipe = {}
-        self.rid_agent = {}
+        self.rid_pk = {}
+        self.rid_session_key = {}
         self.node_rid_pk = {}
         self.node_pk_rid = {}
         self.short_term_forwards = {}
@@ -94,6 +94,7 @@ class Broker:
         self.identity = identity_type()
         self.authenticator = auth_type(self.identity, self.keys)
         self.account_confirm = account_confirm_type(self.identity, self.keys, base_port + 1)
+        self.agent = Agent()
         self.loop = None
         self.next_connection_rid = None
 
@@ -116,8 +117,10 @@ class Broker:
 
         # Set up the message loop
         self.loop = Loop(self.skt, message_type=BrokerMessage, exit_on_exception=True)
-        self.loop.register_exclusive(self.skt, self._event_socket, comment="Events")
-        self.loop.register_exclusive(self.skt.get_monitor_socket(), self._monitor, comment="Socket monitor for events")
+        self.loop.register_exclusive(self.skt, self._event_socket, comment="ZMQ")
+        self.loop.register_exclusive(self.agent.decrypt_pipe[0].fileno(), self._event_pipe, comment="Decrypted")
+        self.loop.register_exclusive(self.agent.encrypt_pipe[0].fileno(), self._emit_encrypted, comment="Encrypted")
+        self.loop.register_exclusive(self.skt.get_monitor_socket(), self._monitor, comment="Events Monitor")
 
         # Client hookups...
         if self.pre_run_callback is not None:
@@ -149,21 +152,21 @@ class Broker:
         :param uuid: A uuid to attach to this command (so it can reply).
         """
         try:
-            agent = self.rid_agent[rid]
+            session_key = self.rid_session_key[rid]
         except KeyError:
-            logging.debug("Failed sending command, no agent for rid: " + hexlify(rid).decode())
+            logging.debug("Failed sending command, no session_key for rid: " + hexlify(rid).decode())
             self.disconnect_for_rid(rid)
             return
 
-        # agent is None implies unencrypted
-        if agent is None:
+        # session_key is None implies unencrypted
+        if session_key is None:
             BrokerMessage.send_socket(self.skt, rid, b'', command, uuid, params, bulk)
         else:
-            BrokerMessage.send_pipe(agent.encrypt_pipe[0], rid, b'', command, uuid, params, bulk)
+            BrokerMessage.send_pipe(self.agent.encrypt_pipe[0], rid, session_key, b'',
+                                    command, uuid, params, bulk)
 
     def set_next_rid(self):
         """Set the routing id for the next socket that connects."""
-        # gives the next connection a unique (but known) routing id
         self.next_connection_rid = bytes([random.randint(0, 255) for _ in range(0, 4)])
         logging.debug("Set next rid to: " + hexlify(self.next_connection_rid).decode())
         self.skt.set(zmq.CONNECT_RID, self.next_connection_rid)
@@ -173,27 +176,26 @@ class Broker:
 
         :param rid: routing id for the client to disconnect."""
         # Remove the crypto agent
-        agent = None
+        session_key = None
         try:
-            agent = self.rid_agent[rid]
-            del self.rid_agent[rid]  # both users and nodes have rid_agent mappings (nodes map to None)
-            if agent is not None:  # a user
-                agent.stop()
-                agent.join()
-                self.loop.unregister_exclusive(agent.encrypt_pipe[0].fileno())
-                self.loop.unregister_exclusive(agent.decrypt_pipe[0].fileno())
-                del self.fd_pipe[agent.encrypt_pipe[0].fileno()]
-                del self.fd_pipe[agent.decrypt_pipe[0].fileno()]
+            # both users and nodes have rid_session_key mappings (nodes map to None)
+            session_key = self.rid_session_key[rid]
+            del self.rid_session_key[rid]
+            del self.rid_pk[rid]
         except KeyError:
-            logging.debug("While disconnecting rid could not find agent or None: " + hexlify(rid).decode())
-            self._disconnect_session(rid)
+            logging.debug("While disconnecting rid could not find session key or None: " + hexlify(rid).decode())
+            try:
+                del self.model.sessions[rid]
+                self.model.delete_session_record(rid)
+            except KeyError:
+                pass
+            return
 
         # Remove the right objects
-        if agent is not None:
+        if session_key is not None:
             self._disconnect_session(rid)
         else:
             self._disconnect_node(rid)
-        del agent
 
     def _handshake(self, msg, skt):
         # gets called via the event loop just like everything else
@@ -211,7 +213,6 @@ class Broker:
             return False, None
 
         # create the session - the 'create session' calls reply to the handshake message
-        agent = None
         if user:
             return True, self._create_user_session(msg, skt, config)
         else:
@@ -245,32 +246,24 @@ class Broker:
             self.model.create_session_record(session)
 
         resources = self.model.resources(pk)
+        session_key = libnacl.utils.salsa_key()
         logging.info("Connected session: " + hexlify(msg.rid).decode())
-
-        # create the encryption agent
-        # we register the filenumber because zmq.poll won't poll a pipe object (but it will for a descriptor)
-        agent = Agent(msg.rid, pk)
-        self.loop.register_exclusive(agent.encrypt_pipe[0].fileno(),
-                                     self._emit_encrypted, comment="Encryption, agent=" + hexlify(msg.rid).decode())
-        self.loop.register_exclusive(agent.decrypt_pipe[0].fileno(),
-                                     self._event_pipe, comment="Decryption, agent=" + hexlify(msg.rid).decode())
-        self.fd_pipe[agent.encrypt_pipe[0].fileno()] = agent.encrypt_pipe[0]
-        self.fd_pipe[agent.decrypt_pipe[0].fileno()] = agent.decrypt_pipe[0]
-        logging.debug("Encrypt pipe for rid: %s -> %s" % (hexlify(msg.rid).decode(), agent.encrypt_pipe[0].fileno()))
-        logging.debug("Decrypt pipe for rid: %s -> %s" % (hexlify(msg.rid).decode(), agent.decrypt_pipe[0].fileno()))
-        self.rid_agent[msg.rid] = agent
+        self.rid_session_key[msg.rid] = session_key
+        self.rid_pk[msg.rid] = pk
 
         # send the session key to the other end
         nonce = libnacl.utils.rand_nonce()
-        parts = [nonce, agent.encrypted_session_key(nonce, self.keys.secret_binary()), msg.rid]
+        enc_session_key = libnacl.crypto_box(session_key, nonce, pk, self.keys.secret_binary())
+        parts = [nonce, enc_session_key, msg.rid]
         binary = cbor.dumps(parts)
         skt.send_multipart((msg.rid, binary))
 
         # maybe create a resource offer
         if resources is not None:
-            BrokerMessage.send_pipe(agent.encrypt_pipe[0], msg.rid, b'', b'resource_offer', b'', resources)
+            BrokerMessage.send_pipe(self.agent.encrypt_pipe[0], msg.rid, session_key,
+                                    b'', b'resource_offer', b'', resources)
 
-        return agent
+        return session_key
 
     def _create_node_session(self, msg, skt, config):
         pk = msg.params['user']
@@ -326,6 +319,7 @@ class Broker:
             del self.model.nodes[pk]
         except KeyError:
             logging.debug("Closing node not held in the model: " + hexlify(rid).decode())
+            return
 
         if self.node_destroy_callback is not None:
             self.node_destroy_callback(rid)
@@ -355,45 +349,45 @@ class Broker:
 
         # since it came in from "outside" it will be plaintext if it came from a node
         try:
-            agent = self.rid_agent[msg.rid]  # may be None, but still a valid (node) connection
-            if agent is None:  # a node
+            session_key = self.rid_session_key[msg.rid]  # may be None, but still a valid (node) connection
+            if session_key is None:  # a node
                 msg.emit_socket = skt
             else:  # a user
                 # send to be decrypted
-                msg.forward_pipe(agent.decrypt_pipe[0])
+                msg.session_key = session_key
+                msg.forward_pipe(self.agent.decrypt_pipe[0])
                 return
 
         # If a new connection.....
         except KeyError:
             self.set_next_rid()
-            success, agent = self._handshake(msg, skt)
+            success, session_key = self._handshake(msg, skt)
             if not success:  # authentication failed
                 msg.params = dict()
                 msg.forward_socket(skt)
                 return
-            self.rid_agent[msg.rid] = agent  # may be None but marks the rid as being valid anyway
+            msg.session_key = session_key
+            self.rid_session_key[msg.rid] = session_key  # may be None but marks the rid as being valid anyway
             return
 
         self._event(msg)
 
     def _event_pipe(self, fd):  # called when pipe 'fd' has a message it wants to inject into the event loop (decrypted)
         # receive from the pipe
-        pipe = self.fd_pipe[fd]
         try:
-            msg = BrokerMessage.receive_pipe(pipe)
+            msg = BrokerMessage.receive_pipe(self.agent.decrypt_pipe[0])
+            msg.emit_pipe = self.agent.encrypt_pipe[0]
         except BaseException:
             logging.info("Something bad happened with a message coming over a pipe: " + str(pipe))
             return
 
         # this may be a cry for help from the encryption agent
-        agent = self.rid_agent[msg.rid]
         if msg.params is None and msg.bulk is None:
-            logging.error("Encryption agent could not decrypt: " + hexlify(agent).decode())
+            logging.error("Encryption agent could not decrypt")
             self.disconnect_for_rid(msg.rid)
             return
 
         # all good
-        msg.emit_pipe = agent.encrypt_pipe[0]
         self._event(msg)
 
     def _event(self, msg):
@@ -416,7 +410,7 @@ class Broker:
                 # does this message want to be part of a long term reply?
                 if msg.command == b'ka':  # i.e. keep-alive
                     msg.command = b''
-                    if msg.rid in self.rid_agent:
+                    if msg.rid in self.rid_session_key:
                         if msg.uuid not in self.model.long_term_forwards:
                             logging.debug("Long term forwarding: %s -> %s" % (msg.uuid.decode(), hexlify(msg.rid).decode()))
                             self.model.long_term_forwards[msg.uuid] = msg.rid
@@ -425,33 +419,31 @@ class Broker:
                             logging.debug("Long term forwarded: " + msg.uuid.decode())
                             msg.rid = self.model.long_term_forwards[msg.uuid]
                     else:
-                        logging.debug("Message wanted long term forwarding but session has gone: " +
-                                      hexlify(msg.rid).decode())
+                        logging.debug("Message wanted long term forwarding but no session: " +hexlify(msg.rid).decode())
                         return
 
                 # if forwarding to a session, try to do so now
                 if msg.rid not in self.node_rid_pk:
                     try:
-                        msg.emit_pipe = self.rid_agent[msg.rid].encrypt_pipe[0]
-                        msg.forward()
+                        msg.session_key = self.rid_session_key[msg.rid]
+                        msg.forward_pipe(self.agent.encrypt_pipe[0])
                     except KeyError:
                         logging.debug("Wanted to send a message reply to a disconnected session: " + msg.uuid.decode())
                     return
 
                 # message will be forwarded to a node in plaintext
-                msg.emit_socket = self.skt
-                msg.forward()
+                msg.forward_socket(self.skt)
                 return
 
             # now we're either dealing with a command or forwarding it to the node so let's add some context
             logging.debug('Event: ' + msg.command.decode())
             if msg.rid in self.node_rid_pk:
                 msg.params['node'] = self.node_rid_pk[msg.rid]
-                logging.debug("...apparently came from node: " + b64encode(msg.params['node']).decode())
-            elif msg.rid in self.rid_agent and self.rid_agent[msg.rid] is not None:
-                msg.params['user'] = self.rid_agent[msg.rid].pk
+                # logging.debug("...apparently came from node: " + b64encode(msg.params['node']).decode())
+            elif msg.rid in self.rid_pk and self.rid_pk[msg.rid] is not None:
+                msg.params['user'] = self.rid_pk[msg.rid]
                 msg.params['session'] = msg.rid
-                logging.debug("...apparently came from session: " + hexlify(msg.rid).decode())
+                # logging.debug("...apparently came from session: " + hexlify(msg.rid).decode())
 
             # if this is a message that laksa can deal with, call the controller
             if msg.command in self.commands:
@@ -467,8 +459,7 @@ class Broker:
 
                 # record the source rid so we can forward replies
                 if msg.replyable():
-                    logging.debug("Short term forwarding: %s -> %s" %
-                                  (msg.uuid.decode(), hexlify(msg.rid).decode()))
+                    logging.debug("Short term forwarding: %s -> %s" %  (msg.uuid.decode(), hexlify(msg.rid).decode()))
                     self.short_term_forwards[msg.uuid] = msg.rid
 
                 # set the rid to the node and forward
@@ -512,8 +503,7 @@ class Broker:
     def _emit_encrypted(self, fd):
         # called when pipe 'fd' has an encrypted message ready to send
         try:
-            pipe = self.fd_pipe[fd]
-            rid, parts = pipe.recv()
+            rid, session_key, parts = self.agent.encrypt_pipe[0].recv()
         except EOFError:
             logging.error("EOF while receiving in _emit_encrypted: " + str(fd))
             return

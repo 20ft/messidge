@@ -16,7 +16,7 @@ from setuptools import setup
 
 setup(
     name='messidge',
-    version='1.1.6',
+    version='1.2.0',
     author='David Preece',
     author_email='davep@20ft.nz',
     url='https://20ft.nz',
