@@ -139,8 +139,13 @@ class Broker:
         # Disconnect nodes
         for rid in list(self.node_pk_rid.values()):
             self.disconnect_for_rid(rid)
+
+        # stop the loop
         if self.loop is not None:  # if can't bind socket, bins out before loop is constructed
             self.loop.stop()
+
+        # stop any threads
+        [obj.stop() for obj in (self.identity, self.agent, self.account_confirm)]
 
     def send_cmd(self, rid, command: bytes, params: dict, *, bulk: bytes=b'', uuid: bytes= b''):
         """Send command to either a node or user

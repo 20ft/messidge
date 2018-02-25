@@ -37,6 +37,7 @@ class Identity:
 
     def stop(self):
         """Stop the background (SqlCache) thread before closing"""
+        logging.debug("Closing Identity")
         self.db.close()
 
     def create_pending_user(self, email) -> str:
@@ -108,6 +109,10 @@ class AccountConfirmationServer(Thread):
         AccountConfirmationServer.pk = keys.public
         AccountConfirmationServer.port = port
         self.start()
+
+    def stop(self):
+        logging.debug("Stopping AccountConfirmationServer")
+        confirmation_server.close()
 
     @staticmethod
     @confirmation_server.route('/', method='POST')

@@ -136,8 +136,6 @@ class Loop:
 
     def stop(self):
         """Causes the thread in 'run' to exit cleanly."""
-        if self.running_thread is None:
-            return
         self.running_thread = None
 
     def set_crypto_params(self, session_key: bytes):

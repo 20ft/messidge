@@ -14,6 +14,7 @@
 import libnacl
 import libnacl.utils
 import os
+import logging
 from multiprocessing import Process, Pipe
 from multiprocessing.connection import wait
 from .message import BrokerMessage
@@ -37,6 +38,7 @@ class Agent(Process):
         return
 
     def stop(self):
+        logging.debug("Stopping Agent")
         self.stop_pipe[0].send(b'')
 
     def run(self):
