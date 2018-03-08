@@ -47,9 +47,9 @@ class Message:
                                                             parts[4],
                                                             nonce,
                                                             session_key)
-        except TypeError:
+        except (TypeError, IndexError):
             pass
-        
+
         # logging.debug("Message.receive (%s:%s:%s)" %
         #               (rtn.uuid.decode(),
         #                rtn.command.decode(),

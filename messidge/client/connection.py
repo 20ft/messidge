@@ -187,7 +187,19 @@ class Connection(Waitable):
         binary = cbor.dumps(parts)
         self.skt.send(binary)
         try:
-            in_binary = self.skt.recv()
+            # poll so we can effect a timeout
+            attempts = 10
+            while True:
+                try:
+                    in_binary = self.skt.recv(flags=zmq.NOBLOCK)
+                    attempts -= 1
+                    if attempts == 0:
+                        raise ValueError("Could not connect.")
+                    break
+                except zmq.ZMQError:
+                    time.sleep(1)
+
+            # did we actually authenticate?
             in_parts = cbor.loads(in_binary)
             if len(in_parts) != 3:
                 raise ValueError("Authentication failed.")

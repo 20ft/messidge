@@ -57,7 +57,7 @@ class BrokerMessage:
         return rtn
 
     @staticmethod
-    def receive_pipe(pipe, encrypted=False):
+    def receive_pipe(pipe, encrypted=False, *, reply_through=None):
         # Receive a message from a multiprocessing pipe
         rid, session_key, parts = pipe.recv()
 
@@ -70,7 +70,7 @@ class BrokerMessage:
         rtn.params = parts[3]
         rtn.bulk = parts[4]
         rtn.is_encrypted = encrypted
-        rtn.emit_pipe = None
+        rtn.emit_pipe = reply_through
         rtn.emit_socket = None
         rtn.time = None
         # print("receive_pipe " + str(rtn))

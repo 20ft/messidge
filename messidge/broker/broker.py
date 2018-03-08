@@ -186,7 +186,6 @@ class Broker:
             # both users and nodes have rid_session_key mappings (nodes map to None)
             session_key = self.rid_session_key[rid]
             del self.rid_session_key[rid]
-            del self.rid_pk[rid]
         except KeyError:
             logging.debug("While disconnecting rid could not find session key or None: " + hexlify(rid).decode())
             try:
@@ -207,7 +206,7 @@ class Broker:
         # because this is the handshake message it's not actually encrypted
         # NOTE that if this falls over the client may/will become jammed and unable to reconnect
         if msg.command != b'auth':
-            logging.debug("Not a handshake message, dropped: " + str(msg.command))
+            logging.debug("Not a handshake message on session: " + hexlify(msg.rid).decode())
             return False, None
 
         # authenticate
@@ -278,8 +277,8 @@ class Broker:
             del self.node_rid_pk[old_rid]  # pk_rid gets overwritten so doesn't need deleting
             self.node_rid_pk[msg.rid] = pk
             self.node_pk_rid[pk] = msg.rid
+            del self.rid_session_key[old_rid]
             logging.info("Reconnected node: " + b64encode(pk).decode())
-
         except KeyError:
             # a node connecting for the first time
             node = self.node_type(pk, msg, config)
@@ -289,13 +288,14 @@ class Broker:
             logging.info("Connected node pk: " + b64encode(pk).decode())
 
         # send a blank session key so the connection knows it's not encrypted
+        self.rid_session_key[msg.rid] = None
         parts = [b'', b'', msg.rid]
         binary = cbor.dumps(parts)
         skt.send_multipart((msg.rid, binary))
         return None
 
     def _monitor(self, skt):
-        # Catches the file descriptor opening and closing
+        # Catches connect and disconnect messages from zmq
         evt = recv_monitor_message(skt)
         descriptor = evt['value']
         if evt['event'] == zmq.EVENT_ACCEPTED:  # the handshake will sort itself out
@@ -319,15 +319,16 @@ class Broker:
         pk = b''
         try:
             pk = self.node_rid_pk[rid]
+            node = self.model.nodes[pk]
             del self.node_rid_pk[rid]
             del self.node_pk_rid[pk]
             del self.model.nodes[pk]
+            if self.node_destroy_callback is not None:
+                self.node_destroy_callback(pk)
         except KeyError:
             logging.debug("Closing node not held in the model: " + hexlify(rid).decode())
             return
 
-        if self.node_destroy_callback is not None:
-            self.node_destroy_callback(rid)
         logging.info("Node disconnected: " + b64encode(pk).decode())
 
     def _disconnect_session(self, rid):
@@ -336,8 +337,10 @@ class Broker:
             sess = self.model.sessions[rid]
             sess.close(self)
             del self.model.sessions[rid]
+            del self.rid_pk[rid]
         except KeyError:
             logging.debug("Closing session not held in the model: " + hexlify(rid).decode())
+            return
 
         if self.session_destroy_callback is not None:
             self.session_destroy_callback(rid)
@@ -352,7 +355,7 @@ class Broker:
             logging.info("Something bad happened with a message coming over a socket: " + str(e))
             return
 
-        # since it came in from "outside" it will be plaintext if it came from a node
+        # it will be plaintext if it came from a node
         try:
             session_key = self.rid_session_key[msg.rid]  # may be None, but still a valid (node) connection
             if session_key is None:  # a node
@@ -369,7 +372,9 @@ class Broker:
             success, session_key = self._handshake(msg, skt)
             if not success:  # authentication failed
                 msg.params = dict()
-                msg.forward_socket(skt)
+                msg.reply()
+                logging.info("Disconnecting rid: " + hexlify(msg.rid).decode())
+                self.disconnect_for_rid(msg.rid)
                 return
             msg.session_key = session_key
             self.rid_session_key[msg.rid] = session_key  # may be None but marks the rid as being valid anyway
@@ -380,10 +385,10 @@ class Broker:
     def _event_pipe(self, fd):  # called when pipe 'fd' has a message it wants to inject into the event loop (decrypted)
         # receive from the pipe
         try:
-            msg = BrokerMessage.receive_pipe(self.agent.decrypt_pipe[0])
-            msg.emit_pipe = self.agent.encrypt_pipe[0]
-        except BaseException:
-            logging.info("Something bad happened with a message coming over a pipe: " + str(pipe))
+            msg = BrokerMessage.receive_pipe(self.agent.decrypt_pipe[0], encrypted=False,
+                                             reply_through=self.agent.encrypt_pipe[0])
+        except BaseException as e:
+            logging.info("Something bad happened with a message coming over a pipe: " + str(e))
             return
 
         # this may be a cry for help from the encryption agent
@@ -408,7 +413,7 @@ class Broker:
                 try:
                     msg.rid = self.short_term_forwards[msg.uuid]
                     del self.short_term_forwards[msg.uuid]
-                    logging.debug("Short term forwarded: " + msg.uuid.decode())
+                    # don't return here because it may yet promote into a long term reply
                 except KeyError:
                     pass  # must be in the long term reply map
 
@@ -417,14 +422,13 @@ class Broker:
                     msg.command = b''
                     if msg.rid in self.rid_session_key:
                         if msg.uuid not in self.model.long_term_forwards:
-                            logging.debug("Long term forwarding: %s -> %s" % (msg.uuid.decode(), hexlify(msg.rid).decode()))
+                            logging.debug("Start forwarding: %s -> %s" % (msg.uuid.decode(), hexlify(msg.rid).decode()))
                             self.model.long_term_forwards[msg.uuid] = msg.rid
                             self.forwarding_insert_callback(msg.uuid, msg.rid)  # persists
-                        else:
-                            logging.debug("Long term forwarded: " + msg.uuid.decode())
-                            msg.rid = self.model.long_term_forwards[msg.uuid]
+                        logging.debug("Forwarded: " + msg.uuid.decode())
+                        msg.rid = self.model.long_term_forwards[msg.uuid]
                     else:
-                        logging.debug("Message wanted long term forwarding but no session: " +hexlify(msg.rid).decode())
+                        logging.debug("Message wanted forwarding but no session: " + hexlify(msg.rid).decode())
                         return
 
                 # if forwarding to a session, try to do so now
@@ -434,14 +438,15 @@ class Broker:
                         msg.forward_pipe(self.agent.encrypt_pipe[0])
                     except KeyError:
                         logging.debug("Wanted to send a message reply to a disconnected session: " + msg.uuid.decode())
-                    return
+                else:
+                    # message will be forwarded to a node in plaintext
+                    msg.forward_socket(self.skt)
 
-                # message will be forwarded to a node in plaintext
-                msg.forward_socket(self.skt)
                 return
 
             # now we're either dealing with a command or forwarding it to the node so let's add some context
-            logging.debug('Event: ' + msg.command.decode())
+            if msg.command.decode() != "update_stats":
+                logging.debug('Event: ' + msg.command.decode())
             if msg.rid in self.node_rid_pk:
                 msg.params['node'] = self.node_rid_pk[msg.rid]
                 # logging.debug("...apparently came from node: " + b64encode(msg.params['node']).decode())
@@ -464,7 +469,6 @@ class Broker:
 
                 # record the source rid so we can forward replies
                 if msg.replyable():
-                    logging.debug("Short term forwarding: %s -> %s" %  (msg.uuid.decode(), hexlify(msg.rid).decode()))
                     self.short_term_forwards[msg.uuid] = msg.rid
 
                 # set the rid to the node and forward
