@@ -276,7 +276,7 @@ class Connection(Waitable):
 
         Message.send(self.send_skt(), cmd, self.session_key, params, uuid=uuid, bulk=bulk)
 
-    def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=120) -> Message:
+    def send_blocking_cmd(self, cmd: bytes, params=None, bulk: bytes=b'', timeout: float=240) -> Message:
         """Sends a command to the location and blocks waiting for a reply (which is returned).
         May raise ValueError exceptions.
 
