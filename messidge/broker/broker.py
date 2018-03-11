@@ -40,7 +40,7 @@ class Broker:
 
     def __init__(self, keys: KeyPair, model, node_type, session_type, controller, *, base_port: int=2020,
                  identity_type=Identity, auth_type=Authenticate, account_confirm_type=AccountConfirmationServer,
-                 pre_run_callback=None, node_destroy_callback=None,
+                 pre_run_callback=None, node_create_callback=None, node_destroy_callback=None,
                  session_recovered_callback=None, session_destroy_callback=None,
                  forwarding_insert_callback=None, forwarding_evict_callback=None):
         """:param keys: Server public/secret keys.
@@ -54,8 +54,10 @@ class Broker:
         :param account_confirm_type: Class to use for confirming client accounts.
         :param pre_run_callback: Fired last thing before the message loop starts.
                                  ...signature ()
+        :param node_create_callback: Fired once a new node has been created.
+                                     ..signature (pk)
         :param node_destroy_callback: Fired last thing before a node is destroyed (was disconnected, say).
-                                      ...signature (rid)
+                                      ...signature (pk)
         :param session_recovered_callback: Fired with the new rid when a session reconnects.
                                            ...signature (session, old_rid, new_rid)
         :param session_destroy_callback: Fired last thing before a session is destroyed.
@@ -77,6 +79,7 @@ class Broker:
         self.session_type = session_type
         self.session_recovered_callback = session_recovered_callback
         self.session_destroy_callback = session_destroy_callback
+        self.node_create_callback = node_create_callback
         self.node_destroy_callback = node_destroy_callback
         self.pre_run_callback = pre_run_callback
         self.base_port = base_port
@@ -220,7 +223,10 @@ class Broker:
         if user:
             return True, self._create_user_session(msg, skt, config)
         else:
-            return True, self._create_node_session(msg, skt, config)
+            rtn = True, self._create_node_session(msg, skt, config)
+            if self.node_create_callback is not None:
+                self.node_create_callback(msg.params['user'])
+            return rtn
 
     def _create_user_session(self, msg, skt, config):
         # are we reconnecting to a persisted session? params['rid'] refers to the rid it *used* to be
@@ -319,7 +325,6 @@ class Broker:
         pk = b''
         try:
             pk = self.node_rid_pk[rid]
-            node = self.model.nodes[pk]
             del self.node_rid_pk[rid]
             del self.node_pk_rid[pk]
             del self.model.nodes[pk]
