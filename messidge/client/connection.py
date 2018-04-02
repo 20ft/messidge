@@ -18,6 +18,7 @@ import libnacl.utils
 import cbor
 import psutil
 import time
+from binascii import hexlify
 from threading import Thread
 from _thread import allocate_lock, get_ident
 from base64 import b64decode
@@ -102,16 +103,15 @@ class Connection(Waitable):
     def wait_until_complete(self):
         """Blocks until the message loop exits"""
         self.thread.join()
-
-        # re-raises (on the main thread) if the loop caught an exception
-        if self.exception is not None:
+        if self.exception is not None:  # re-raises (on the main thread) if the loop caught an exception
             raise self.exception
 
     def disconnect(self):
         """Stop the message loop and disconnect - without this object cannot be garbage collected"""
+        self.loop.stop()
+        self.thread.join()
         for thread_id in list(self.thread_skt.keys()):
             self.destroy_send_skt_for(thread_id)
-        self.loop.stop()
         self.thread_skt.clear()
         self.connect_callbacks.clear()
         self.uuid_blockreply.clear()
@@ -182,6 +182,8 @@ class Connection(Waitable):
 
         # send the encryption session request
         # the rid is used to show which session we *were* if reconnecting
+        if self.rid != b'':
+            logging.debug("Connecting with old rid: " + hexlify(self.rid).decode())
         params = {'user': self.keys.public_binary(), 'rid': self.rid}
         parts = [b'', b'auth', b'', params, b'']
         binary = cbor.dumps(parts)
@@ -216,6 +218,7 @@ class Connection(Waitable):
                 self.loop.set_crypto_params(self.session_key)
         except libnacl.CryptError:
             raise ValueError("Handshake failed.")
+        logging.debug("Setting rid to: " + hexlify(rid).decode())
         self.rid = rid
         logging.info("Handshake completed")
         for callback in self.connect_callbacks:
@@ -287,24 +290,31 @@ class Connection(Waitable):
         :return: The reply message.
         """
         thread = get_ident()
-        if thread == self.loop_thread:
-            raise RuntimeError("Cannot send a blocking command on the loop thread")
-
-        # acquire a lock, wait for the reply
         uuid = shortuuid.uuid().encode()
-        self.uuid_blockreply[uuid] = allocate_lock()
-        self.uuid_blockreply[uuid].acquire()
-        self.send_cmd(cmd, params, uuid=uuid, reply_callback=self._unblock, bulk=bulk)
 
-        # when the background thread has an answer, the lock will release and we can continue
-        if not self.uuid_blockreply[uuid].acquire(timeout=timeout):
-            raise ValueError("Blocking call timed out: %s(%s)" % (cmd.decode(), str(params)))
-        msg = self.uuid_blockresults[uuid]
+        # if on the background thread we need to block differently...
+        if thread != self.loop_thread:
+            # acquire a lock, wait for the reply
+            self.uuid_blockreply[uuid] = allocate_lock()
+            self.uuid_blockreply[uuid].acquire()
+            self.send_cmd(cmd, params, uuid=uuid, reply_callback=self._unblock, bulk=bulk)
 
-        # clean up
-        self.uuid_blockreply[uuid].release()
-        del self.uuid_blockreply[uuid]
-        del self.uuid_blockresults[uuid]
+            # when the background thread has an answer, the lock will release and we can continue
+            if not self.uuid_blockreply[uuid].acquire(timeout=timeout):
+                raise ValueError("Blocking call timed out: %s(%s)" % (cmd.decode(), str(params)))
+            msg = self.uuid_blockresults[uuid]
+
+            # clean up
+            self.uuid_blockreply[uuid].release()
+            del self.uuid_blockreply[uuid]
+            del self.uuid_blockresults[uuid]
+
+        # background thread
+        else:
+            self.loop.register_reply(uuid, None)
+            self.send_cmd(cmd, params, uuid=uuid, bulk=bulk)
+            msg = self.loop.run()
+            self.loop.unregister_reply(uuid)
 
         # raise exceptions if either in the message or caught on a background thread
         if 'exception' in msg.params:

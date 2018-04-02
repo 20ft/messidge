@@ -88,7 +88,14 @@ class Loop:
                     try:
                         # is this a hooked reply? - these may well deal with (or raise) exceptions...
                         try:
-                            self.reply_callbacks[msg.uuid](msg)
+                            cb = self.reply_callbacks[msg.uuid]
+                            if cb is not None:
+                                cb(msg)
+                            else:
+                                # a blank reply callback means this is the background thread's result
+                                # and we need to return control back to where it's blocking
+                                logging.debug("Leaving nested message loop.")
+                                return msg
                             continue
                         except KeyError:
                             pass
@@ -195,11 +202,10 @@ class Loop:
         """Hooking the reply to a command. Note that this will not override an exclusive socket.
 
         :param command_uuid: the uuid of the command message from which we are expecting a reply.
-        :param callback: the callback that gets sent the reply message when it arrives."""
-        if callback is not None:
-            self.reply_callbacks[command_uuid] = callback
-        else:
-            raise RuntimeError("Tried to register a reply for a command but passed None for the callback")
+        :param callback: the callback that gets sent the reply message when it arrives.
+
+        Note that callback == None calls 'return' with the message"""
+        self.reply_callbacks[command_uuid] = callback
 
     def unregister_reply(self, command_uuid: bytes):
         """Removing the hook for a command reply.
