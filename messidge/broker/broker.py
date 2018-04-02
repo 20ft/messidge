@@ -135,13 +135,7 @@ class Broker:
 
     def stop(self):
         """Stop background threads. Must be called to allow garbage collection and for a clean exit."""
-        # DO NOT explicitly disconnect user sessions
-        # for rid in list(self.fd_rid.values()):
-        #     self.disconnect_for_rid(rid, is_definitely_user=True)
-
-        # Disconnect nodes
-        for rid in list(self.node_pk_rid.values()):
-            self.disconnect_for_rid(rid)
+        # DO NOT explicitly disconnect user sessions or nodes
 
         # stop the loop
         if self.loop is not None:  # if can't bind socket, bins out before loop is constructed
@@ -163,7 +157,8 @@ class Broker:
             session_key = self.rid_session_key[rid]
         except KeyError:
             logging.debug("Failed sending command, no session_key for rid: " + hexlify(rid).decode())
-            self.disconnect_for_rid(rid)
+            # don't call 'disconnect' on the rid because
+            # this might be a recovering session that hasn't negotiated yet
             return
 
         # session_key is None implies unencrypted
@@ -233,7 +228,6 @@ class Broker:
         # tag words: recover, rewrite, map
         pk = msg.params['user']
         resources = None
-        session = None
         if msg.params['rid'] in self.model.sessions:  # pre-existing session
             # Update rids so the session now has the new rid
             session = self.model.sessions[msg.params['rid']]
@@ -250,12 +244,12 @@ class Broker:
             if self.session_recovered_callback is not None:
                 self.session_recovered_callback(session, msg.params['rid'], msg.rid)
         else:
-            # if an alias is connecting then it will need the original pk to be used because encryption
+            # new session
             session = self.session_type(msg.rid, pk)
             self.model.sessions[msg.rid] = session
             self.model.create_session_record(session)
+            resources = self.model.resources(pk)  # only create for new session
 
-        resources = self.model.resources(pk)
         session_key = libnacl.utils.salsa_key()
         logging.info("Connected session: " + hexlify(msg.rid).decode())
         self.rid_session_key[msg.rid] = session_key
@@ -430,8 +424,8 @@ class Broker:
                             logging.debug("Start forwarding: %s -> %s" % (msg.uuid.decode(), hexlify(msg.rid).decode()))
                             self.model.long_term_forwards[msg.uuid] = msg.rid
                             self.forwarding_insert_callback(msg.uuid, msg.rid)  # persists
-                        logging.debug("Forwarded: " + msg.uuid.decode())
                         msg.rid = self.model.long_term_forwards[msg.uuid]
+                        logging.debug("Forwarded to: " + hexlify(msg.rid).decode())
                     else:
                         logging.debug("Message wanted forwarding but no session: " + hexlify(msg.rid).decode())
                         return
