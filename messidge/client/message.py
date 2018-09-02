@@ -98,7 +98,7 @@ class Message:
         #                list(results.keys()) if isinstance(results, dict) else "--"))
         if results is None:
             results = {}
-        Message.send(socket, b'ka' if long_term else b'',
+        Message.send(socket, b'ka' if long_term else bulk,
                      self.session_key, results, uuid=self.uuid, bulk=bulk, trace=False)
 
     def forward(self, socket):
