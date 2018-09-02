@@ -107,10 +107,8 @@ class BrokerMessage:
     def reply(self, results=None, bulk=None):
         # Called on an existing message, presumably a command to provide the results
         # You can store a message and call reply more than once
-        if results is None:
-            self.results = {}
-        if bulk is not None:
-            self.bulk = bulk
+        self.results = results if results is not None else {}
+        self.bulk = bulk if bulk is not None else b''
 
         if self.emit_pipe is not None:
             # print("reply send_pipe " + str(self))
